@@ -1,0 +1,13 @@
+{% extends 'base.html' %} {% block content %}
+<h2>{{ profile.company_name }}</h2>
+{% if profile.is_approved %}
+<div class="alert alert-success">
+  Your company is verified. You can post jobs.
+</div>
+{% else %}
+<div class="alert alert-warning">
+  Verification status:
+  <strong>{{ profile.get_verification_status_display }}</strong>. You can post
+  jobs once an administrator approves your company.
+</div>
+{% endif %} {% endblock %}
