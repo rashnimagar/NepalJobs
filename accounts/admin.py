@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, JobseekerProfile, EmployerProfile
+from .models import User, JobseekerProfile, EmployerProfile, CV
 
 # Register your models here.
 @admin.register(User)
@@ -11,6 +11,7 @@ class CustomUserAdmin(UserAdmin):
     list_filter = ("role", "is_staff")
 
 admin.site.register(JobseekerProfile)
+admin.site.register(CV)
 
 @admin.register(EmployerProfile)
 class EmployerProfileAdmin(admin.ModelAdmin):

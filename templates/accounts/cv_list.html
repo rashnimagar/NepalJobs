@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block title %}My CVs - NepalJobs{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">My CVs</h2>
+<div class="row g-4">
+  <div class="col-md-7">
+    {% for cv in cvs %}
+    <div class="card mb-3">
+      <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <h5 class="mb-1">
+            {{ cv.title }}
+            {% if cv.is_default %}<span class="badge text-bg-success">Default</span>{% endif %}
+          </h5>
+          <div class="text-muted small">{{ cv.original_filename }} - uploaded {{ cv.uploaded_at|date:"j M Y" }}</div>
+        </div>
+        <div class="d-flex gap-2">
+          <a class="btn btn-sm btn-outline-secondary" href="{% url 'cv_download' cv.pk %}" target="_blank">View</a>
+          {% if not cv.is_default %}
+          <form method="post" action="{% url 'cv_set_default' cv.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-sm btn-outline-primary" type="submit">Make default</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{% url 'cv_delete' cv.pk %}" onsubmit="return confirm('Delete this CV?');">
+            {% csrf_token %}
+            <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% empty %}
+    <p class="text-muted">You haven't uploaded a CV yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="col-md-5">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Upload a CV</h5>
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% include 'includes/form_fields.html' %}
+          <p class="form-text">PDF, DOC or DOCX, up to 5 MB. You can keep {{ max_cvs }} CVs.</p>
+          <button class="btn btn-primary" type="submit">Upload</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

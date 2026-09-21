@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 
-from .models import EmployerProfile, JobseekerProfile, User
+from .models import EmployerProfile, JobseekerProfile, User, CV
 
 
 class BootstrapFormMixin:
@@ -53,3 +53,15 @@ class EmployerSignUpForm(BootstrapFormMixin, UserCreationForm):
                 address=self.cleaned_data["address"],
             )
         return user
+
+class JobseekerProfileForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = JobseekerProfile
+        fields = ("phone", "location", "summary")
+        widgets = {"summary": forms.Textarea(attrs={"rows": 5})}
+
+
+class CVUploadForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = CV
+        fields = ("title", "file")

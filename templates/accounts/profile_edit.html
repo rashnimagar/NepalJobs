@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block title %}My Profile - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-7">
+    <h2 class="mb-4">My Profile</h2>
+    <form method="post">
+      {% csrf_token %}
+      {% include 'includes/form_fields.html' %}
+      <button class="btn btn-primary" type="submit">Save profile</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

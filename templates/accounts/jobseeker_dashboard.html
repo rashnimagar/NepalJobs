@@ -1,6 +1,10 @@
-{% extends 'base.html' %} {% block content %}
+{% extends 'base.html' %}
+
+{% block content %}
 <h2>Welcome, {{ user.first_name|default:user.username }}</h2>
-<p class="text-muted">
-  Your jobseeker dashboard. Profile, CVs and applications will appear here.
-</p>
+<p class="text-muted">Manage your profile and CVs, then start applying.</p>
+<div class="d-flex gap-2">
+  <a class="btn btn-primary" href="{% url 'profile_edit' %}">Edit profile</a>
+  <a class="btn btn-outline-primary" href="{% url 'cv_list' %}">My CVs</a>
+</div>
 {% endblock %}
