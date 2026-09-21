@@ -20,3 +20,24 @@ def role_required(role):
 
 jobseeker_required = role_required(User.Role.JOBSEEKER)
 employer_required = role_required(User.Role.EMPLOYER)
+
+
+def approved_employer_required(view_func):
+    """Requires: authenticated + employer role + EmployerProfile approved.
+    Pending/rejected employers hit 403. Anonymous users redirect to login.
+    employer_required is deliberately separate so dashboard/profile pages
+    remain reachable for all employer verification states.
+    """
+    @login_required
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if request.user.role != User.Role.EMPLOYER:
+            raise PermissionDenied
+        try:
+            profile = request.user.employer_profile
+        except Exception:
+            raise PermissionDenied
+        if not profile.is_approved:
+            raise PermissionDenied
+        return view_func(request, *args, **kwargs)
+    return wrapper

@@ -37,6 +37,36 @@ class JobseekerProfile(models.Model):
     def __str__(self):
         return  self.user.get_full_name() or self.user.username
 
+MAX_LOGO_SIZE_MB = 2
+MAX_VERIFICATION_DOC_SIZE_MB = 10
+
+
+def validate_logo_size(file):
+    if file.size > MAX_LOGO_SIZE_MB * 1024 * 1024:
+        raise ValidationError(f"Logo must be {MAX_LOGO_SIZE_MB} MB or smaller.")
+
+
+def validate_verification_doc_size(file):
+    if file.size > MAX_VERIFICATION_DOC_SIZE_MB * 1024 * 1024:
+        raise ValidationError(
+            f"Verification document must be {MAX_VERIFICATION_DOC_SIZE_MB} MB or smaller."
+        )
+
+
+def logo_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return f"logos/employer_{instance.user_id}/{uuid.uuid4().hex}{ext}"
+
+
+def verification_doc_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return f"verification_docs/employer_{instance.user_id}/{uuid.uuid4().hex}{ext}"
+
+
+def private_verification_storage():
+    return FileSystemStorage(location=settings.PRIVATE_MEDIA_ROOT)
+
+
 class EmployerProfile(models.Model):
     class VerificationStatus(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -47,6 +77,31 @@ class EmployerProfile(models.Model):
     company_name = models.CharField(max_length=200)
     phone = models.CharField(max_length=20, blank=True)
     address = models.CharField(max_length=255, blank=True)
+    # Step 5 additions
+    logo = models.ImageField(
+        upload_to=logo_upload_path,
+        blank=True,
+        validators=[
+            FileExtensionValidator(["jpg", "jpeg", "png", "webp"]),
+            validate_logo_size,
+        ],
+        help_text="Optional. JPG, PNG or WebP, up to 2 MB.",
+    )
+    industry = models.CharField(max_length=100, blank=True)
+    website = models.URLField(blank=True)
+    description = models.TextField(blank=True)
+    verification_document = models.FileField(
+        upload_to=verification_doc_upload_path,
+        storage=private_verification_storage,
+        blank=True,
+        validators=[
+            FileExtensionValidator(["pdf", "jpg", "jpeg", "png"]),
+            validate_verification_doc_size,
+        ],
+        help_text="PDF or image, up to 10 MB. Kept private.",
+    )
+    rejection_reason = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
     verification_status = models.CharField(
         max_length=10, choices=VerificationStatus.choices, default=VerificationStatus.PENDING
     )
@@ -55,8 +110,26 @@ class EmployerProfile(models.Model):
     def is_approved(self):
         return self.verification_status == self.VerificationStatus.APPROVED
 
+    @property
+    def is_pending(self):
+        return self.verification_status == self.VerificationStatus.PENDING
+
+    @property
+    def is_rejected(self):
+        return self.verification_status == self.VerificationStatus.REJECTED
+
+    def submit_for_verification(self):
+        """Move Rejected → Pending. Only callable from Rejected state."""
+        if self.verification_status != self.VerificationStatus.REJECTED:
+            raise ValueError("Only rejected employers may resubmit for verification.")
+        self.verification_status = self.VerificationStatus.PENDING
+        self.rejection_reason = ""
+        self.reviewed_at = None
+        self.save(update_fields=["verification_status", "rejection_reason", "reviewed_at"])
+
     def __str__(self):
         return self.company_name
+
 
 MAX_ACTIVE_CVS = 5
 MAX_CV_SIZE_MB = 5
