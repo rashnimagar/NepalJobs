@@ -1,3 +1,7 @@
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.urls import reverse_lazy
+from django.views.generic import CreateView, DeleteView, UpdateView
+
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
@@ -7,8 +11,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .decorators import employer_required, jobseeker_required
-from .forms import CVUploadForm, EmployerSignUpForm, JobseekerProfileForm, JobseekerSignUpForm
-from .models import CV, MAX_ACTIVE_CVS
+from .forms import (CVUploadForm, EducationForm, EmployerSignUpForm, ExperienceForm, JobseekerProfileForm, JobseekerSignUpForm, SkillsForm)
+from .models import CV, MAX_ACTIVE_CVS, Education, Experience, Skill
 
 
 def register_choice(request):
@@ -50,7 +54,23 @@ def dashboard(request):
 
 @jobseeker_required
 def jobseeker_dashboard(request):
-    return render(request, "accounts/jobseeker_dashboard.html")
+    profile = request.user.jobseeker_profile
+    steps = [
+        ("Add your contact details and summary",
+         bool(profile.phone and profile.location and profile.summary), "profile_edit"),
+        ("Add your education", profile.educations.exists(), "education_add"),
+        ("Add your skills", profile.skills.exists(), "skills_edit"),
+        ("Add your work experience", profile.experiences.exists(), "experience_add"),
+        ("Upload a CV", profile.cvs.filter(is_active=True).exists(), "cv_list"),
+    ]
+    done = sum(1 for _, ok, _ in steps if ok)
+    return render(request, "accounts/jobseeker_dashboard.html", {
+        "steps": steps,
+        "done": done,
+        "total": len(steps),
+        "percent": int(done * 100 / len(steps)),
+    })
+
 
 
 @employer_required
@@ -59,13 +79,22 @@ def employer_dashboard(request):
     return render(request, "accounts/employer_dashboard.html", {"profile": profile})
 
 @jobseeker_required
+def profile_view(request):
+    profile = request.user.jobseeker_profile
+    return render(request, "accounts/profile_view.html", {
+        "profile": profile,
+        "default_cv": profile.cvs.filter(is_active=True, is_default=True).first(),
+    })
+
+
+@jobseeker_required
 def profile_edit(request):
     profile = request.user.jobseeker_profile
     form = JobseekerProfileForm(request.POST or None, instance=profile)
     if request.method == "POST" and form.is_valid():
         form.save()
         messages.success(request, "Profile updated.")
-        return redirect("profile_edit")
+        return redirect("profile")
     return render(request, "accounts/profile_edit.html", {"form": form})
 
 
@@ -115,3 +144,76 @@ def cv_download(request, pk):
     if not (request.user.is_jobseeker and cv.profile.user_id == request.user.id):
         raise PermissionDenied
     return FileResponse(cv.file.open("rb"), filename=cv.original_filename)
+
+@jobseeker_required
+def skills_edit(request):
+    profile = request.user.jobseeker_profile
+    initial = {"skills": ", ".join(profile.skills.values_list("name", flat=True))}
+    form = SkillsForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        skills = [Skill.objects.get_or_create(name=name)[0] for name in form.cleaned_data["skills"]]
+        profile.skills.set(skills)
+        messages.success(request, "Skills updated.")
+        return redirect("profile")
+    return render(request, "accounts/skills_edit.html", {"form": form})
+
+
+class ProfileSectionMixin(LoginRequiredMixin, UserPassesTestMixin):
+    """Jobseekers only, and only ever the logged-in user's own entries."""
+    section_name = ""
+    success_url = reverse_lazy("profile")
+
+    def test_func(self):
+        return self.request.user.is_jobseeker
+
+    def get_queryset(self):
+        return self.model.objects.filter(profile=self.request.user.jobseeker_profile)
+
+
+class SectionCreateView(ProfileSectionMixin, CreateView):
+    template_name = "accounts/section_form.html"
+
+    def form_valid(self, form):
+        form.instance.profile = self.request.user.jobseeker_profile
+        messages.success(self.request, f"{self.section_name} added.")
+        return super().form_valid(form)
+
+
+class SectionUpdateView(ProfileSectionMixin, UpdateView):
+    template_name = "accounts/section_form.html"
+
+    def form_valid(self, form):
+        messages.success(self.request, f"{self.section_name} updated.")
+        return super().form_valid(form)
+
+
+class SectionDeleteView(ProfileSectionMixin, DeleteView):
+    http_method_names = ["post"]
+
+    def form_valid(self, form):
+        messages.success(self.request, f"{self.section_name} entry removed.")
+        return super().form_valid(form)
+
+
+class EducationCreateView(SectionCreateView):
+    model, form_class, section_name = Education, EducationForm, "Education"
+
+
+class EducationUpdateView(SectionUpdateView):
+    model, form_class, section_name = Education, EducationForm, "Education"
+
+
+class EducationDeleteView(SectionDeleteView):
+    model, section_name = Education, "Education"
+
+
+class ExperienceCreateView(SectionCreateView):
+    model, form_class, section_name = Experience, ExperienceForm, "Experience"
+
+
+class ExperienceUpdateView(SectionUpdateView):
+    model, form_class, section_name = Experience, ExperienceForm, "Experience"
+
+
+class ExperienceDeleteView(SectionDeleteView):
+    model, section_name = Experience, "Experience"

@@ -8,6 +8,7 @@ from django.core.files.storage import FileSystemStorage
 from django.core.validators import FileExtensionValidator
 from django.db.models import Q
 from django.db import models, transaction
+from django.utils import timezone
 
 
 class User(AbstractUser):
@@ -31,6 +32,7 @@ class JobseekerProfile(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     location = models.CharField(max_length=100, blank=True)
     summary = models.TextField(blank=True)
+    skills = models.ManyToManyField("Skill", blank=True, related_name="jobseekers")
 
     def __str__(self):
         return  self.user.get_full_name() or self.user.username
@@ -116,3 +118,93 @@ class CV(models.Model):
             replacement = CV.objects.filter(profile=self.profile, is_active=True).first()
             if replacement:
                 replacement.make_default()
+
+
+MAX_SKILLS = 20
+
+
+class Skill(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def save(self, *args, **kwargs):
+        self.name = " ".join(self.name.split()).lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class Education(models.Model):
+    class Level(models.TextChoices):
+        SEE = "see", "SEE"
+        PLUS_TWO = "plus2", "+2 / High School"
+        DIPLOMA = "diploma", "Diploma"
+        BACHELOR = "bachelor", "Bachelor's"
+        MASTER = "master", "Master's"
+        PHD = "phd", "PhD"
+        OTHER = "other", "Other"
+
+    profile = models.ForeignKey(JobseekerProfile, on_delete=models.CASCADE, related_name="educations")
+    level = models.CharField(max_length=10, choices=Level.choices)
+    degree = models.CharField(max_length=150)
+    institution = models.CharField(max_length=200)
+    field_of_study = models.CharField(max_length=150, blank=True)
+    start_year = models.PositiveSmallIntegerField()
+    end_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_ongoing = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-is_ongoing", "-end_year", "-start_year"]
+
+    def __str__(self):
+        return f"{self.degree} - {self.institution}"
+
+    def clean(self):
+        errors = {}
+        this_year = timezone.localdate().year
+        if self.start_year and not (1950 <= self.start_year <= this_year):
+            errors["start_year"] = "Enter a valid start year."
+        if self.is_ongoing:
+            self.end_year = None
+        elif not self.end_year:
+            errors["end_year"] = "Enter the end year, or tick 'I'm currently studying here'."
+        elif self.start_year and self.end_year < self.start_year:
+            errors["end_year"] = "End year cannot be before the start year."
+        if errors:
+            raise ValidationError(errors)
+
+
+class Experience(models.Model):
+    profile = models.ForeignKey(JobseekerProfile, on_delete=models.CASCADE, related_name="experiences")
+    job_title = models.CharField(max_length=150)
+    company = models.CharField(max_length=200)
+    location = models.CharField(max_length=100, blank=True)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    is_current = models.BooleanField(default=False)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-is_current", "-start_date"]
+
+    def __str__(self):
+        return f"{self.job_title} at {self.company}"
+
+    def clean(self):
+        errors = {}
+        today = timezone.localdate()
+        if self.start_date and self.start_date > today:
+            errors["start_date"] = "Start date cannot be in the future."
+        if self.is_current:
+            self.end_date = None
+        elif not self.end_date:
+            errors["end_date"] = "Enter the end date, or tick 'I currently work here'."
+        elif self.start_date and self.end_date < self.start_date:
+            errors["end_date"] = "End date cannot be before the start date."
+        elif self.end_date > today:
+            errors["end_date"] = "End date cannot be in the future."
+        if errors:
+            raise ValidationError(errors)

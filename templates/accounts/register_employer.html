@@ -3,12 +3,15 @@
 <div class="row justify-content-center">
   <div class="col-md-6">
     <h2 class="mb-4">Register as Employer</h2>
-    <form method="post">
-      {% csrf_token %} {% include 'includes/form_fields.html' %}
-      <button class="btn btn-primary w-100" type="submit">
-        Create company account
-      </button>
-    </form>
+    <div class="card">
+      <div class="card-body p-4">
+        <form method="post">
+          {% csrf_token %}
+          {% include 'includes/form_fields.html' %}
+          <button class="btn btn-primary w-100" type="submit">Create Company Account</button>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

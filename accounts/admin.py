@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, JobseekerProfile, EmployerProfile, CV
+from .models import User, JobseekerProfile, EmployerProfile, CV, Skill, Education, Experience
 
 # Register your models here.
 @admin.register(User)
@@ -17,3 +17,11 @@ admin.site.register(CV)
 class EmployerProfileAdmin(admin.ModelAdmin):
     list_display = ("company_name", "user", "verification_status")
     list_filter = ("verification_status",)
+
+@admin.register(Skill)
+class SkillAdmin(admin.ModelAdmin):
+    search_fields = ("name",)
+
+
+admin.site.register(Education)
+admin.site.register(Experience)
