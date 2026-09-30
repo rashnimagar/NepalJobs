@@ -61,6 +61,35 @@ class EmployerSignUpForm(BootstrapFormMixin, UserCreationForm):
             )
         return user
 
+
+class EmployerProfileForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = EmployerProfile
+        fields = (
+            "company_name",
+            "phone",
+            "address",
+            "industry",
+            "website",
+            "description",
+            "logo",
+        )
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 5}),
+            "website": forms.URLInput(attrs={"placeholder": "https://example.com"}),
+        }
+
+
+class EmployerVerificationForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = EmployerProfile
+        fields = ("verification_document",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["verification_document"].required = True
+
+
 class JobseekerProfileForm(BootstrapFormMixin, forms.ModelForm):
     first_name = forms.CharField(max_length=150)
     last_name = forms.CharField(max_length=150)

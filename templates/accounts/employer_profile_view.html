@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ profile.company_name }} - Company Profile - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a class="text-decoration-none small" href="{% url 'employer_dashboard' %}">&larr; Back to dashboard</a>
+</div>
+
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
+  <h2 class="mb-0">Company Profile</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-primary" href="{% url 'employer_profile_edit' %}">Edit Profile</a>
+    {% if profile.is_approved %}
+      <a class="btn btn-outline-success" href="{% url 'company_detail' profile.pk %}">Public Page</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-3 mb-4">
+          {% if profile.logo %}
+            <img src="{{ profile.logo.url }}" alt="{{ profile.company_name }} Logo" class="company-logo-hero">
+          {% else %}
+            <div class="company-logo-hero-placeholder">{{ profile.company_name|slice:":1"|upper }}</div>
+          {% endif %}
+          <div>
+            <h3 class="mb-1">{{ profile.company_name }}</h3>
+            <div class="text-muted">
+              {% if profile.industry %}<span class="fw-medium text-dark">{{ profile.industry }}</span> &bull; {% endif %}
+              {{ profile.address|default:"Location not set" }}
+            </div>
+          </div>
+        </div>
+
+        <h5 class="mb-3 border-bottom pb-2">Business Information</h5>
+        <div class="row">
+          <div class="col-sm-6">
+            <div class="info-label">Industry</div>
+            <div class="info-value">
+              {% if profile.industry %}{{ profile.industry }}{% else %}<span class="empty">Not specified</span>{% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Website</div>
+            <div class="info-value">
+              {% if profile.website %}
+                <a href="{{ profile.website }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">{{ profile.website }}</a>
+              {% else %}
+                <span class="empty">Not specified</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Phone Number</div>
+            <div class="info-value">
+              {% if profile.phone %}{{ profile.phone }}{% else %}<span class="empty">Not specified</span>{% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Address / Office Location</div>
+            <div class="info-value">
+              {% if profile.address %}{{ profile.address }}{% else %}<span class="empty">Not specified</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-label">About the Company</div>
+        {% if profile.description %}
+          <div class="info-value mb-0">{{ profile.description|linebreaksbr }}</div>
+        {% else %}
+          <div class="info-value empty mb-0">No company description has been added yet. Click &ldquo;Edit Profile&rdquo; to describe your organization, mission, and culture.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        <h5 class="mb-3">Verification Details</h5>
+        <div class="mb-3">
+          <div class="info-label">Status</div>
+          <div>
+            {% if profile.is_approved %}
+              <span class="badge bg-success">Verified Company</span>
+            {% elif profile.is_rejected %}
+              <span class="badge bg-danger">Verification Rejected</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Under Review</span>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if profile.is_approved %}
+          <div class="small text-secondary mb-3">
+            Your company is fully verified. Jobseekers can discover your public profile and job vacancies.
+          </div>
+          <div class="d-grid">
+            <a class="btn btn-outline-success btn-sm" href="{% url 'company_detail' profile.pk %}">View Public Profile</a>
+          </div>
+        {% elif profile.is_rejected %}
+          <div class="small text-secondary mb-2">
+            Verification could not be approved based on the submitted documentation.
+          </div>
+          {% if profile.rejection_reason %}
+            <div class="alert alert-danger p-2 small mb-3">
+              <strong>Feedback:</strong> {{ profile.rejection_reason }}
+            </div>
+          {% endif %}
+          <div class="d-grid">
+            <a class="btn btn-danger btn-sm" href="{% url 'employer_verification_submit' %}">Resubmit Verification Document</a>
+          </div>
+        {% else %}
+          <div class="small text-secondary mb-3">
+            Your verification document is being processed. An administrator will review your business credentials shortly.
+          </div>
+          {% if not profile.verification_document %}
+            <div class="d-grid">
+              <a class="btn btn-warning btn-sm" href="{% url 'employer_verification_submit' %}">Upload Verification Document</a>
+            </div>
+          {% endif %}
+        {% endif %}
+
+        <hr class="my-3">
+        <div class="text-muted small">
+          <em>Verification documents are stored securely in encrypted private storage and only accessible to NepalJobs administrators.</em>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body p-4">
+        <h5 class="mb-3">Account Information</h5>
+        <div class="info-label">Contact Email</div>
+        <div class="info-value mb-2">{{ profile.user.email }}</div>
+        <div class="info-label">Account Username</div>
+        <div class="info-value mb-0">{{ profile.user.username }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

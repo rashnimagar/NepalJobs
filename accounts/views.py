@@ -1,3 +1,5 @@
+import os
+
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, UpdateView
@@ -6,13 +8,23 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.http import FileResponse
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .decorators import employer_required, jobseeker_required
-from .forms import (CVUploadForm, EducationForm, EmployerSignUpForm, ExperienceForm, JobseekerProfileForm, JobseekerSignUpForm, SkillsForm)
-from .models import CV, MAX_ACTIVE_CVS, Education, Experience, Skill
+from .forms import (
+    CVUploadForm,
+    EducationForm,
+    EmployerProfileForm,
+    EmployerSignUpForm,
+    EmployerVerificationForm,
+    ExperienceForm,
+    JobseekerProfileForm,
+    JobseekerSignUpForm,
+    SkillsForm,
+)
+from .models import CV, MAX_ACTIVE_CVS, Education, EmployerProfile, Experience, Skill
 
 
 def register_choice(request):
@@ -76,7 +88,113 @@ def jobseeker_dashboard(request):
 @employer_required
 def employer_dashboard(request):
     profile = request.user.employer_profile
-    return render(request, "accounts/employer_dashboard.html", {"profile": profile})
+    return render(
+        request,
+        "accounts/employer_dashboard.html",
+        {
+            "profile": profile,
+            "employer_profile": profile,
+            "verification_status": profile.verification_status,
+            "is_approved": profile.is_approved,
+            "is_pending": profile.is_pending,
+            "is_rejected": profile.is_rejected,
+            "rejection_reason": profile.rejection_reason,
+            "has_verification_document": bool(profile.verification_document),
+            "can_post_jobs": profile.is_approved,
+        },
+    )
+
+
+@employer_required
+def employer_profile(request):
+    profile = request.user.employer_profile
+    return render(
+        request,
+        "accounts/employer_profile_view.html",
+        {
+            "profile": profile,
+        },
+    )
+
+
+@employer_required
+def employer_profile_edit(request):
+    profile = request.user.employer_profile
+    form = EmployerProfileForm(
+        request.POST or None, request.FILES or None, instance=profile
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Company profile updated.")
+        return redirect("employer_profile")
+    return render(
+        request,
+        "accounts/employer_profile_edit.html",
+        {
+            "form": form,
+            "profile": profile,
+        },
+    )
+
+
+@employer_required
+def employer_verification_submit(request):
+    profile = request.user.employer_profile
+    if profile.is_approved:
+        messages.info(request, "Your company is already verified.")
+        return redirect("employer_dashboard")
+
+    form = EmployerVerificationForm(
+        request.POST or None, request.FILES or None, instance=profile
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        if profile.is_rejected:
+            profile.submit_for_verification()
+        messages.success(
+            request, "Verification document submitted. Your account is pending review."
+        )
+        return redirect("employer_dashboard")
+
+    return render(
+        request,
+        "accounts/employer_verification.html",
+        {
+            "form": form,
+            "profile": profile,
+        },
+    )
+
+
+def company_detail(request, pk):
+    company = get_object_or_404(
+        EmployerProfile,
+        pk=pk,
+        verification_status=EmployerProfile.VerificationStatus.APPROVED,
+    )
+    return render(
+        request,
+        "accounts/company_detail.html",
+        {
+            "company": company,
+        },
+    )
+
+
+@login_required
+def verification_document_download(request, pk):
+    if not (request.user.is_staff or request.user.is_superuser):
+        raise PermissionDenied
+    profile = get_object_or_404(EmployerProfile, pk=pk)
+    if not profile.verification_document:
+        raise Http404("No verification document uploaded.")
+    try:
+        file_obj = profile.verification_document.open("rb")
+    except (FileNotFoundError, ValueError):
+        raise Http404("Verification document file missing.")
+    filename = os.path.basename(profile.verification_document.name)
+    return FileResponse(file_obj, filename=filename)
+
 
 @jobseeker_required
 def profile_view(request):

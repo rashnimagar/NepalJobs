@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block title %}
+  {% if profile.is_rejected %}Resubmit Verification{% else %}Submit Verification{% endif %} - NepalJobs
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="mb-3">
+      <a class="text-decoration-none small" href="{% url 'employer_dashboard' %}">&larr; Back to dashboard</a>
+    </div>
+
+    <h2 class="mb-1">
+      {% if profile.is_rejected %}
+        Resubmit Verification Document
+      {% else %}
+        Company Verification
+      {% endif %}
+    </h2>
+    <p class="text-muted mb-4">
+      To maintain trust and safety for jobseekers, NepalJobs requires official registration documents from all employers before job postings can be published.
+    </p>
+
+    {% if profile.is_rejected and profile.rejection_reason %}
+      <div class="card border-0 mb-4 bg-danger-subtle text-danger-emphasis border-start border-danger border-4 shadow-sm">
+        <div class="card-body p-4">
+          <h5 class="alert-heading fw-bold mb-1">Previous Submission Feedback</h5>
+          <p class="small text-secondary mb-2">Please review the reason your previous verification document could not be accepted:</p>
+          <div class="p-3 bg-white border border-danger-subtle rounded text-danger small">
+            {{ profile.rejection_reason }}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {# Document Requirements Card #}
+    <div class="card mb-4 bg-light border">
+      <div class="card-body p-4">
+        <h6 class="fw-bold mb-2">Document Requirements &amp; Guidelines</h6>
+        <ul class="small text-muted mb-0 ps-3">
+          <li class="mb-1"><strong>Accepted Document Types:</strong> Company Registration Certificate, PAN / VAT Certificate, or Municipal Business License.</li>
+          <li class="mb-1"><strong>Accepted File Formats:</strong> PDF, JPG, JPEG, PNG.</li>
+          <li class="mb-1"><strong>Maximum File Size:</strong> 10 MB.</li>
+          <li><strong>Confidentiality:</strong> Verification documents are encrypted and kept strictly confidential in private storage. They are never shared publicly.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body p-4">
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% include 'includes/form_fields.html' %}
+
+          <div class="d-flex gap-2 mt-4 pt-2 border-top">
+            <button class="btn btn-primary" type="submit">
+              {% if profile.is_rejected %}Resubmit Verification{% else %}Submit for Verification{% endif %}
+            </button>
+            <a class="btn btn-outline-secondary" href="{% url 'employer_dashboard' %}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ company.company_name }} - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a class="text-decoration-none small text-muted" href="{% url 'home' %}">&larr; Back to NepalJobs</a>
+</div>
+
+{# Company Header Card #}
+<div class="card mb-4 shadow-sm">
+  <div class="card-body p-4 p-md-5">
+    <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-4">
+      {% if company.logo %}
+        <img src="{{ company.logo.url }}" alt="{{ company.company_name }} Logo" class="company-logo-hero">
+      {% else %}
+        <div class="company-logo-hero-placeholder">{{ company.company_name|slice:":1"|upper }}</div>
+      {% endif %}
+      <div class="flex-grow-1">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h1 class="h2 mb-0 fw-bold">{{ company.company_name }}</h1>
+          <span class="badge bg-success-subtle text-success border border-success-subtle">
+            &#10003; Verified Company
+          </span>
+        </div>
+        <div class="text-muted">
+          {% if company.industry %}<span class="fw-medium text-dark">{{ company.industry }}</span>{% endif %}
+          {% if company.industry and company.address %} &bull; {% endif %}
+          {% if company.address %}<span>{{ company.address }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  {# Main Column: Description and Jobs #}
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">About {{ company.company_name }}</h4>
+        {% if company.description %}
+          <div class="text-secondary" style="line-height: 1.7;">
+            {{ company.description|linebreaksbr }}
+          </div>
+        {% else %}
+          <p class="text-muted mb-0">No company description provided yet.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Active Job Openings</h4>
+        <p class="text-muted mb-0">There are currently no active job vacancies listed for this company.</p>
+      </div>
+    </div>
+  </div>
+
+  {# Sidebar Column: Company Details #}
+  <div class="col-lg-4">
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3 border-bottom pb-2">Company Overview</h5>
+
+        <div class="info-label">Industry</div>
+        <div class="info-value">
+          {% if company.industry %}{{ company.industry }}{% else %}<span class="empty">Not specified</span>{% endif %}
+        </div>
+
+        <div class="info-label">Location</div>
+        <div class="info-value">
+          {% if company.address %}{{ company.address }}{% else %}<span class="empty">Not specified</span>{% endif %}
+        </div>
+
+        {% if company.phone %}
+          <div class="info-label">Contact Phone</div>
+          <div class="info-value">{{ company.phone }}</div>
+        {% endif %}
+
+        <div class="info-label">Official Website</div>
+        <div class="info-value mb-0">
+          {% if company.website %}
+            <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer" class="text-break">{{ company.website }}</a>
+          {% else %}
+            <span class="empty">Not specified</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

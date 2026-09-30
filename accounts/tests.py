@@ -9,12 +9,18 @@ Run with:  python manage.py test accounts
 """
 
 import io
+import os
+import shutil
+import tempfile
 
+from PIL import Image
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse, resolve
 
+from .forms import EmployerProfileForm, EmployerVerificationForm
 from .models import (
     CV,
     MAX_ACTIVE_CVS,
@@ -55,6 +61,18 @@ def make_pdf(name="resume.pdf", size_bytes=1024):
     return SimpleUploadedFile(
         name, b"%PDF-1.4 " + b"x" * max(0, size_bytes - 10), content_type="application/pdf"
     )
+
+
+def make_image(name="logo.png", size_bytes=1024, format="PNG"):
+    """Return a valid SimpleUploadedFile image."""
+    buf = io.BytesIO()
+    if size_bytes > 2 * 1024 * 1024:
+        img = Image.frombytes("RGB", (1000, 1000), b"\x00" * 3000000)
+        img.save(buf, format="PNG", compress_level=0)
+    else:
+        img = Image.new("RGB", (100, 100), color="blue")
+        img.save(buf, format=format)
+    return SimpleUploadedFile(name, buf.getvalue(), content_type=f"image/{format.lower()}")
 
 
 # ---------------------------------------------------------------------------
@@ -894,3 +912,536 @@ class DashboardTests(TestCase):
         response = self._get_dashboard()
         # 1 out of 5 = 20%
         self.assertEqual(response.context["percent"], 20)
+
+
+# ---------------------------------------------------------------------------
+# 12. Step 5.1 Employer Form Tests
+# ---------------------------------------------------------------------------
+
+class EmployerProfileFormTests(TestCase):
+
+    def setUp(self):
+        self.temp_media = tempfile.mkdtemp()
+        self.settings_override = self.settings(MEDIA_ROOT=self.temp_media)
+        self.settings_override.enable()
+
+    def tearDown(self):
+        self.settings_override.disable()
+        shutil.rmtree(self.temp_media, ignore_errors=True)
+
+    def test_valid_company_information_accepted(self):
+        logo = make_image("logo.png")
+        data = {
+            "company_name": "Kathmandu Tech Solutions",
+            "phone": "+977-1-4200000",
+            "address": "Tinkune, Kathmandu",
+            "industry": "Information Technology",
+            "website": "https://ktmtech.example.com",
+            "description": "Leading software company in Nepal.",
+        }
+        form = EmployerProfileForm(data=data, files={"logo": logo})
+        self.assertTrue(form.is_valid(), form.errors)
+        employer = make_employer()
+        profile = employer.employer_profile
+        form = EmployerProfileForm(data=data, files={"logo": logo}, instance=profile)
+        saved = form.save()
+        self.assertEqual(saved.company_name, "Kathmandu Tech Solutions")
+        self.assertEqual(saved.industry, "Information Technology")
+        self.assertTrue(saved.logo.name.startswith("logos/employer_"))
+
+    def test_invalid_website_rejected(self):
+        data = {
+            "company_name": "Kathmandu Tech Solutions",
+            "website": "not-a-valid-url",
+        }
+        form = EmployerProfileForm(data=data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("website", form.errors)
+
+    def test_oversized_logo_rejected(self):
+        big_logo = make_image("big_logo.png", size_bytes=3 * 1024 * 1024)
+        data = {"company_name": "Big Logo Ltd"}
+        form = EmployerProfileForm(data=data, files={"logo": big_logo})
+        self.assertFalse(form.is_valid())
+        self.assertIn("logo", form.errors)
+        self.assertTrue(any("2 MB" in err for err in form.errors["logo"]))
+
+    def test_unsupported_logo_format_rejected(self):
+        gif_logo = make_image("logo.gif", format="GIF")
+        data = {"company_name": "Gif Logo Ltd"}
+        form = EmployerProfileForm(data=data, files={"logo": gif_logo})
+        self.assertFalse(form.is_valid())
+        self.assertIn("logo", form.errors)
+
+    def test_non_editable_fields_not_present(self):
+        form = EmployerProfileForm()
+        excluded_fields = [
+            "verification_status",
+            "rejection_reason",
+            "reviewed_at",
+            "verification_document",
+            "user",
+        ]
+        for field in excluded_fields:
+            self.assertNotIn(field, form.fields)
+
+
+class EmployerVerificationFormTests(TestCase):
+
+    def setUp(self):
+        self.temp_private = tempfile.mkdtemp()
+        self.settings_override = self.settings(PRIVATE_MEDIA_ROOT=self.temp_private)
+        self.settings_override.enable()
+
+    def tearDown(self):
+        self.settings_override.disable()
+        shutil.rmtree(self.temp_private, ignore_errors=True)
+
+    def test_valid_verification_document_accepted(self):
+        valid_pdf = make_pdf("pan_card.pdf", size_bytes=2048)
+        form = EmployerVerificationForm(data={}, files={"verification_document": valid_pdf})
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_valid_image_verification_document_accepted(self):
+        valid_image = make_image("registration.jpg", format="JPEG")
+        form = EmployerVerificationForm(data={}, files={"verification_document": valid_image})
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_oversized_document_rejected(self):
+        big_doc = make_pdf("huge_audit.pdf", size_bytes=11 * 1024 * 1024)
+        form = EmployerVerificationForm(data={}, files={"verification_document": big_doc})
+        self.assertFalse(form.is_valid())
+        self.assertIn("verification_document", form.errors)
+        self.assertTrue(any("10 MB" in err for err in form.errors["verification_document"]))
+
+    def test_unsupported_document_format_rejected(self):
+        bad_doc = SimpleUploadedFile("doc.docx", b"word doc content", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        form = EmployerVerificationForm(data={}, files={"verification_document": bad_doc})
+        self.assertFalse(form.is_valid())
+        self.assertIn("verification_document", form.errors)
+
+    def test_only_verification_document_field_exposed(self):
+        form = EmployerVerificationForm()
+        self.assertEqual(list(form.fields.keys()), ["verification_document"])
+        self.assertTrue(form.fields["verification_document"].required)
+        empty_form = EmployerVerificationForm(data={}, files={})
+        self.assertFalse(empty_form.is_valid())
+        self.assertIn("verification_document", empty_form.errors)
+
+
+# ---------------------------------------------------------------------------
+# 13. Step 5.2 Employer Views & URL Routing Tests
+# ---------------------------------------------------------------------------
+
+class Step5ViewsBaseTestCase(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.temp_private = tempfile.mkdtemp()
+        self.temp_media = tempfile.mkdtemp()
+        self.storage_override = self.settings(
+            PRIVATE_MEDIA_ROOT=self.temp_private,
+            MEDIA_ROOT=self.temp_media,
+        )
+        self.storage_override.enable()
+
+    def tearDown(self):
+        super().tearDown()
+        self.storage_override.disable()
+        shutil.rmtree(self.temp_private, ignore_errors=True)
+        shutil.rmtree(self.temp_media, ignore_errors=True)
+
+
+
+class EmployerProfileViewTests(Step5ViewsBaseTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.employer = make_employer("emp_view", "emp_view@example.com")
+        self.other_employer = make_employer("emp_other", "emp_other@example.com")
+        self.jobseeker = make_jobseeker("js_view", "js_view@example.com")
+
+    def test_employer_can_view_own_profile(self):
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_profile"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["profile"], self.employer.employer_profile)
+
+    def test_employer_can_edit_own_profile(self):
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_profile_edit"))
+        self.assertEqual(response.status_code, 200)
+
+        logo = make_image("new_logo.png")
+        post_data = {
+            "company_name": "Updated Corp",
+            "phone": "+977-1-5555555",
+            "address": "Lalitpur",
+            "industry": "FinTech",
+            "website": "https://updatedcorp.example.com",
+            "description": "Updated company description.",
+            "logo": logo,
+        }
+        post_response = self.client.post(reverse("employer_profile_edit"), post_data)
+        self.assertRedirects(post_response, reverse("employer_profile"))
+        self.employer.employer_profile.refresh_from_db()
+        self.assertEqual(self.employer.employer_profile.company_name, "Updated Corp")
+        self.assertEqual(self.employer.employer_profile.industry, "FinTech")
+
+    def test_jobseeker_denied_employer_profile_views(self):
+        self.client.force_login(self.jobseeker)
+        res_view = self.client.get(reverse("employer_profile"))
+        self.assertEqual(res_view.status_code, 403)
+        res_edit = self.client.get(reverse("employer_profile_edit"))
+        self.assertEqual(res_edit.status_code, 403)
+
+    def test_another_employer_cannot_access_other_private_profile(self):
+        # Views retrieve request.user.employer_profile; they take no ID parameter.
+        self.client.force_login(self.other_employer)
+        response = self.client.get(reverse("employer_profile"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["profile"], self.other_employer.employer_profile)
+        self.assertNotEqual(response.context["profile"], self.employer.employer_profile)
+
+
+class EmployerVerificationViewTests(Step5ViewsBaseTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.employer = make_employer("emp_ver", "emp_ver@example.com")
+        self.profile = self.employer.employer_profile
+
+    def test_employer_can_submit_valid_verification_document(self):
+        self.client.force_login(self.employer)
+        pdf = make_pdf("company_doc.pdf")
+        response = self.client.post(
+            reverse("employer_verification_submit"),
+            {"verification_document": pdf},
+        )
+        self.assertRedirects(response, reverse("employer_dashboard"))
+        self.profile.refresh_from_db()
+        self.assertTrue(bool(self.profile.verification_document))
+        self.assertEqual(self.profile.verification_status, EmployerProfile.VerificationStatus.PENDING)
+
+    def test_rejected_employer_can_resubmit_and_reason_cleared(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.profile.rejection_reason = "Document unclear or missing stamp."
+        self.profile.save()
+
+        self.client.force_login(self.employer)
+        pdf = make_pdf("corrected_doc.pdf")
+        response = self.client.post(
+            reverse("employer_verification_submit"),
+            {"verification_document": pdf},
+        )
+        self.assertRedirects(response, reverse("employer_dashboard"))
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.verification_status, EmployerProfile.VerificationStatus.PENDING)
+        self.assertEqual(self.profile.rejection_reason, "")
+        self.assertIsNone(self.profile.reviewed_at)
+
+    def test_approved_employer_cannot_reset_approval(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile.save()
+
+        self.client.force_login(self.employer)
+        pdf = make_pdf("extra_doc.pdf")
+        response = self.client.post(
+            reverse("employer_verification_submit"),
+            {"verification_document": pdf},
+        )
+        self.assertRedirects(response, reverse("employer_dashboard"))
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.verification_status, EmployerProfile.VerificationStatus.APPROVED)
+
+    def test_invalid_upload_does_not_change_verification_state(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.profile.rejection_reason = "Fix required."
+        self.profile.save()
+
+        self.client.force_login(self.employer)
+        bad_doc = SimpleUploadedFile("invalid.exe", b"binary", content_type="application/octet-stream")
+        response = self.client.post(
+            reverse("employer_verification_submit"),
+            {"verification_document": bad_doc},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.verification_status, EmployerProfile.VerificationStatus.REJECTED)
+        self.assertEqual(self.profile.rejection_reason, "Fix required.")
+
+
+class PublicCompanyProfileViewTests(Step5ViewsBaseTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.approved_user = make_employer("emp_appr", "emp_appr@example.com")
+        self.approved_profile = self.approved_user.employer_profile
+        self.approved_profile.company_name = "Approved Co"
+        self.approved_profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.approved_profile.verification_document = make_pdf("private_secret.pdf")
+        self.approved_profile.save()
+
+        self.pending_user = make_employer("emp_pend", "emp_pend@example.com")
+        self.pending_profile = self.pending_user.employer_profile
+        self.pending_profile.verification_status = EmployerProfile.VerificationStatus.PENDING
+        self.pending_profile.save()
+
+        self.rejected_user = make_employer("emp_rej", "emp_rej@example.com")
+        self.rejected_profile = self.rejected_user.employer_profile
+        self.rejected_profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.rejected_profile.save()
+
+    def test_approved_employer_public_profile_returns_200(self):
+        response = self.client.get(reverse("company_detail", args=[self.approved_profile.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["company"], self.approved_profile)
+
+    def test_pending_employer_public_profile_returns_404(self):
+        response = self.client.get(reverse("company_detail", args=[self.pending_profile.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_rejected_employer_public_profile_returns_404(self):
+        response = self.client.get(reverse("company_detail", args=[self.rejected_profile.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_private_verification_document_not_in_public_response(self):
+        response = self.client.get(reverse("company_detail", args=[self.approved_profile.pk]))
+        content = response.content.decode()
+        self.assertNotIn("private_secret.pdf", content)
+        self.assertNotIn(self.approved_profile.verification_document.name, content)
+
+
+class VerificationDocumentDownloadViewTests(Step5ViewsBaseTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.staff_user = User.objects.create_user("staff_member", "staff@example.com", "Pass123!", is_staff=True)
+        self.employer_user = make_employer("emp_file", "emp_file@example.com")
+        self.profile_with_doc = self.employer_user.employer_profile
+        self.profile_with_doc.verification_document = SimpleUploadedFile("tax_cert.pdf", b"%PDF-1.4 file content", content_type="application/pdf")
+        self.profile_with_doc.save()
+
+        self.employer_no_doc = make_employer("emp_nofile", "emp_nofile@example.com").employer_profile
+        self.jobseeker_user = make_jobseeker("seeker_file", "seeker_file@example.com")
+
+    def test_guest_denied_document_download(self):
+        response = self.client.get(reverse("verification_document_download", args=[self.profile_with_doc.pk]))
+        self.assertEqual(response.status_code, 302)
+
+    def test_jobseeker_denied_document_download(self):
+        self.client.force_login(self.jobseeker_user)
+        response = self.client.get(reverse("verification_document_download", args=[self.profile_with_doc.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_normal_employer_denied_document_download(self):
+        self.client.force_login(self.employer_user)
+        response = self.client.get(reverse("verification_document_download", args=[self.profile_with_doc.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_can_access_document(self):
+        self.client.force_login(self.staff_user)
+        response = self.client.get(reverse("verification_document_download", args=[self.profile_with_doc.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response, FileResponse)
+
+    def test_missing_document_returns_404(self):
+        self.client.force_login(self.staff_user)
+        response = self.client.get(reverse("verification_document_download", args=[self.employer_no_doc.pk]))
+        self.assertEqual(response.status_code, 404)
+
+
+class EmployerDashboardContextTests(TestCase):
+
+    def setUp(self):
+        self.employer = make_employer("emp_dash", "emp_dash@example.com")
+        self.profile = self.employer.employer_profile
+        self.client.force_login(self.employer)
+
+    def test_pending_employer_dashboard_context(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.PENDING
+        self.profile.save()
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_pending"])
+        self.assertFalse(response.context["is_approved"])
+        self.assertFalse(response.context["is_rejected"])
+        self.assertFalse(response.context["can_post_jobs"])
+
+    def test_approved_employer_dashboard_context(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile.save()
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_approved"])
+        self.assertFalse(response.context["is_pending"])
+        self.assertTrue(response.context["can_post_jobs"])
+
+    def test_rejected_employer_dashboard_context(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.profile.rejection_reason = "Registration invalid"
+        self.profile.save()
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_rejected"])
+        self.assertEqual(response.context["rejection_reason"], "Registration invalid")
+        self.assertFalse(response.context["can_post_jobs"])
+
+    def test_dashboard_context_has_verification_document_flag(self):
+        self.assertFalse(self.profile.verification_document)
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertFalse(response.context["has_verification_document"])
+
+        self.profile.verification_document = SimpleUploadedFile("cert.pdf", b"%PDF-1.4 data", content_type="application/pdf")
+        self.profile.save()
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertTrue(response.context["has_verification_document"])
+
+
+# ---------------------------------------------------------------------------
+# 14. Step 5.3 Employer UI & Template Rendering Tests
+# ---------------------------------------------------------------------------
+
+class Step5EmployerTemplateRenderTests(Step5ViewsBaseTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.employer = make_employer("tpl_emp", "tpl_emp@example.com")
+        self.profile = self.employer.employer_profile
+        self.profile.company_name = "TechSphere Nepal"
+        self.profile.industry = "Software & IT"
+        self.profile.website = "https://techsphere.example.com"
+        self.profile.phone = "+977-1-4444444"
+        self.profile.address = "Tinkune, Kathmandu"
+        self.profile.description = "Leading software engineering consultancy in Nepal."
+        self.profile.save()
+
+    def test_approved_employer_dashboard_renders_approved_state(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile.save()
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Company Verified", content)
+        self.assertIn("Verified", content)
+        self.assertIn("TechSphere Nepal", content)
+        self.assertIn(reverse("company_detail", args=[self.profile.pk]), content)
+        self.assertNotIn("Verification Pending", content)
+        self.assertNotIn("Action Required", content)
+
+    def test_pending_employer_dashboard_renders_pending_state(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.PENDING
+        self.profile.save()
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Verification Pending", content)
+        self.assertIn("Under Review", content)
+        self.assertNotIn("Company Verified", content)
+        self.assertNotIn("Verification Not Approved", content)
+
+    def test_rejected_employer_dashboard_renders_rejection_reason(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.profile.rejection_reason = "PAN certificate blurred and illegible."
+        self.profile.save()
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Verification Not Approved", content)
+        self.assertIn("Action Required", content)
+        self.assertIn("PAN certificate blurred and illegible.", content)
+        self.assertIn(reverse("employer_verification_submit"), content)
+
+    def test_employer_profile_view_renders_company_info(self):
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_profile"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("TechSphere Nepal", content)
+        self.assertIn("Software &amp; IT", content)
+        self.assertIn("https://techsphere.example.com", content)
+        self.assertIn("+977-1-4444444", content)
+        self.assertIn("Tinkune, Kathmandu", content)
+        self.assertIn("Leading software engineering consultancy in Nepal.", content)
+        self.assertIn(reverse("employer_profile_edit"), content)
+        self.assertNotIn("private_media", content)
+
+    def test_employer_profile_edit_renders_expected_form(self):
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_profile_edit"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('enctype="multipart/form-data"', content)
+        self.assertIn("Edit Company Profile", content)
+        self.assertIn('name="company_name"', content)
+        self.assertIn('name="industry"', content)
+        self.assertIn('name="website"', content)
+        self.assertIn('name="logo"', content)
+        self.assertIn("Save Changes", content)
+
+    def test_employer_verification_page_renders_form_and_guidelines(self):
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_verification_submit"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('enctype="multipart/form-data"', content)
+        self.assertIn("10 MB", content)
+        self.assertIn("PDF", content)
+        self.assertIn("Company Verification", content)
+        self.assertIn('name="verification_document"', content)
+
+    def test_rejected_employer_verification_page_renders_feedback(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.profile.rejection_reason = "Official stamp is missing from the submitted document."
+        self.profile.save()
+        self.client.force_login(self.employer)
+        response = self.client.get(reverse("employer_verification_submit"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Official stamp is missing from the submitted document.", content)
+        self.assertIn("Resubmit Verification", content)
+
+    def test_public_company_page_renders_expected_public_fields(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile.save()
+        response = self.client.get(reverse("company_detail", args=[self.profile.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("TechSphere Nepal", content)
+        self.assertIn("Verified Company", content)
+        self.assertIn("Software &amp; IT", content)
+        self.assertIn("https://techsphere.example.com", content)
+        self.assertIn("Leading software engineering consultancy in Nepal.", content)
+
+    def test_public_company_page_does_not_expose_private_document_or_rejection(self):
+        self.profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile.verification_document = SimpleUploadedFile("secret_biz_reg.pdf", b"%PDF-1.4 sample", content_type="application/pdf")
+        self.profile.rejection_reason = "Internal admin note that should never be shown."
+        self.profile.save()
+        response = self.client.get(reverse("company_detail", args=[self.profile.pk]))
+        content = response.content.decode()
+        self.assertNotIn("secret_biz_reg.pdf", content)
+        self.assertNotIn(self.profile.verification_document.name, content)
+        self.assertNotIn("Internal admin note that should never be shown.", content)
+        self.assertNotIn("private_media", content)
+
+    def test_logo_rendering_and_fallback(self):
+        # Without logo, placeholder monogram is shown
+        self.profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile.save()
+        response = self.client.get(reverse("company_detail", args=[self.profile.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("company-logo-hero-placeholder", content)
+        self.assertIn("T", content)
+
+        # With logo uploaded
+        self.profile.logo = make_image("brand_logo.png")
+        self.profile.save()
+        response2 = self.client.get(reverse("company_detail", args=[self.profile.pk]))
+        self.assertEqual(response2.status_code, 200)
+        content2 = response2.content.decode()
+        self.assertIn(self.profile.logo.url, content2)
+        self.assertIn("company-logo-hero", content2)

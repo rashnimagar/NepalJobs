@@ -43,3 +43,52 @@ footer {
   color: var(--nj-muted);
   font-size: 0.875rem;
 }
+
+/* Company Logo Display */
+.company-logo-lg {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+}
+
+.company-logo-placeholder {
+  width: 72px;
+  height: 72px;
+  background-color: #e2e8f0;
+  color: #475569;
+  border-radius: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.5rem;
+  user-select: none;
+}
+
+.company-logo-hero {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  padding: 0.35rem;
+}
+
+.company-logo-hero-placeholder {
+  width: 96px;
+  height: 96px;
+  background-color: #e2e8f0;
+  color: #475569;
+  border-radius: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 2rem;
+  user-select: none;
+}

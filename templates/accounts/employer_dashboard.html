@@ -1,13 +1,212 @@
-{% extends 'base.html' %} {% block content %}
-<h2>{{ profile.company_name }}</h2>
-{% if profile.is_approved %}
-<div class="alert alert-success">
-  Your company is verified. You can post jobs.
+{% extends 'base.html' %}
+
+{% block title %}Employer Dashboard - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
+  <div>
+    <h2 class="mb-1">Employer Dashboard</h2>
+    <p class="text-muted mb-0">Manage your company profile and monitor recruitment activities.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-primary btn-sm" href="{% url 'employer_profile' %}">View Profile</a>
+    <a class="btn btn-primary btn-sm" href="{% url 'employer_profile_edit' %}">Edit Company</a>
+  </div>
 </div>
-{% else %}
-<div class="alert alert-warning">
-  Verification status:
-  <strong>{{ profile.get_verification_status_display }}</strong>. You can post
-  jobs once an administrator approves your company.
+
+{# Verification Status Section #}
+{% if is_approved %}
+  <div class="card border-0 mb-4 bg-success-subtle text-success-emphasis border-start border-success border-4 shadow-sm">
+    <div class="card-body p-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+      <div>
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span class="badge bg-success">Verified</span>
+          <h5 class="card-title mb-0 fw-bold">Company Verified</h5>
+        </div>
+        <p class="card-text mb-0 small text-secondary">
+          Your company is officially verified. You are authorized to post jobs and search for qualified candidates.
+        </p>
+      </div>
+      <div class="d-flex gap-2">
+        <a class="btn btn-success btn-sm text-nowrap" href="{% url 'company_detail' profile.pk %}">View Public Profile</a>
+      </div>
+    </div>
+  </div>
+{% elif is_pending %}
+  <div class="card border-0 mb-4 bg-warning-subtle text-warning-emphasis border-start border-warning border-4 shadow-sm">
+    <div class="card-body p-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+      <div>
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span class="badge bg-warning text-dark">Under Review</span>
+          <h5 class="card-title mb-0 fw-bold">Verification Pending</h5>
+        </div>
+        <p class="card-text mb-0 small text-secondary">
+          {% if has_verification_document %}
+            Your company verification document has been submitted and is currently being reviewed by our administration team. Job posting capabilities will be enabled immediately upon approval.
+          {% else %}
+            Your account is currently pending verification. Please upload your company registration or PAN certificate to enable job posting capabilities.
+          {% endif %}
+        </p>
+      </div>
+      <div>
+        {% if not has_verification_document %}
+          <a class="btn btn-warning btn-sm text-nowrap" href="{% url 'employer_verification_submit' %}">Upload Document</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% elif is_rejected %}
+  <div class="card border-0 mb-4 bg-danger-subtle text-danger-emphasis border-start border-danger border-4 shadow-sm">
+    <div class="card-body p-4">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <span class="badge bg-danger">Action Required</span>
+        <h5 class="card-title mb-0 fw-bold">Verification Not Approved</h5>
+      </div>
+      <p class="card-text small text-secondary mb-3">
+        Your verification request was not approved. Please review the feedback below and submit an updated document to complete verification.
+      </p>
+      {% if rejection_reason %}
+        <div class="alert alert-danger mb-3 p-3 bg-white border border-danger-subtle">
+          <div class="fw-semibold text-danger mb-1">Reason for Rejection:</div>
+          <div class="text-danger small">{{ rejection_reason }}</div>
+        </div>
+      {% endif %}
+      <div>
+        <a class="btn btn-danger btn-sm" href="{% url 'employer_verification_submit' %}">Update / Resubmit Verification</a>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="row g-4">
+  {# Left Column: Company Overview #}
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-3 mb-4">
+          {% if profile.logo %}
+            <img src="{{ profile.logo.url }}" alt="{{ profile.company_name }} Logo" class="company-logo-lg">
+          {% else %}
+            <div class="company-logo-placeholder">{{ profile.company_name|slice:":1"|upper }}</div>
+          {% endif %}
+          <div>
+            <h4 class="mb-1">{{ profile.company_name }}</h4>
+            <div class="text-muted small">
+              {% if profile.industry %}<span class="fw-medium text-dark">{{ profile.industry }}</span> &bull; {% endif %}
+              {{ profile.address|default:"Address not specified" }}
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-sm-6">
+            <div class="info-label">Industry</div>
+            <div class="info-value">
+              {% if profile.industry %}{{ profile.industry }}{% else %}<span class="empty">Not specified</span>{% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Website</div>
+            <div class="info-value">
+              {% if profile.website %}
+                <a href="{{ profile.website }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">{{ profile.website }}</a>
+              {% else %}
+                <span class="empty">Not specified</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Phone</div>
+            <div class="info-value">
+              {% if profile.phone %}{{ profile.phone }}{% else %}<span class="empty">Not specified</span>{% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Location / Address</div>
+            <div class="info-value">
+              {% if profile.address %}{{ profile.address }}{% else %}<span class="empty">Not specified</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-label">Company Overview</div>
+        {% if profile.description %}
+          <div class="info-value mb-3">{{ profile.description|linebreaksbr }}</div>
+        {% else %}
+          <div class="info-value empty mb-3">No description provided yet. Add a company summary to introduce your organization to jobseekers.</div>
+        {% endif %}
+
+        <div class="pt-2 border-top">
+          <a class="btn btn-outline-primary btn-sm" href="{% url 'employer_profile_edit' %}">Edit Company Profile</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# Right Column: Verification & Quick Actions #}
+  <div class="col-lg-4">
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        <h5 class="mb-3">Verification Status</h5>
+        <div class="mb-3">
+          <div class="info-label">Status</div>
+          <div>
+            {% if is_approved %}
+              <span class="badge bg-success">Verified</span>
+            {% elif is_rejected %}
+              <span class="badge bg-danger">Rejected</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Pending Review</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Document on File</div>
+          <div class="small">
+            {% if has_verification_document %}
+              <span class="text-success fw-medium">&#10003; Document uploaded</span>
+            {% else %}
+              <span class="text-muted">&#9675; No document uploaded</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Job Posting Access</div>
+          <div class="small">
+            {% if can_post_jobs %}
+              <span class="text-success fw-semibold">&#10003; Authorized</span>
+            {% else %}
+              <span class="text-secondary">Requires approved status</span>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if is_rejected %}
+          <div class="d-grid mt-3">
+            <a class="btn btn-danger btn-sm" href="{% url 'employer_verification_submit' %}">Resubmit Verification</a>
+          </div>
+        {% elif is_pending and not has_verification_document %}
+          <div class="d-grid mt-3">
+            <a class="btn btn-warning btn-sm" href="{% url 'employer_verification_submit' %}">Upload Verification Document</a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body p-4">
+        <h5 class="mb-3">Quick Links</h5>
+        <div class="d-grid gap-2">
+          <a class="btn btn-outline-primary" href="{% url 'employer_profile' %}">View Full Profile</a>
+          <a class="btn btn-outline-secondary" href="{% url 'employer_profile_edit' %}">Edit Company Details</a>
+          {% if is_approved %}
+            <a class="btn btn-outline-success" href="{% url 'company_detail' profile.pk %}">Public Company Page</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-{% endif %} {% endblock %}
+{% endblock %}

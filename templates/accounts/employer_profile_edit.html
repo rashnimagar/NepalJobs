@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Company Profile - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="mb-3">
+      <a class="text-decoration-none small" href="{% url 'employer_profile' %}">&larr; Back to company profile</a>
+    </div>
+
+    <h2 class="mb-1">Edit Company Profile</h2>
+    <p class="text-muted mb-4">Update your organization&rsquo;s public information and company logo.</p>
+
+    <div class="card mb-4">
+      <div class="card-body p-4">
+        {% if profile.logo %}
+          <div class="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded border">
+            <img src="{{ profile.logo.url }}" alt="{{ profile.company_name }} Logo" class="company-logo-lg">
+            <div>
+              <div class="fw-semibold small">Current Logo</div>
+              <div class="text-muted small">To replace this logo, choose a new image file below. Accepted formats: JPG, PNG, WebP (up to 2 MB).</div>
+            </div>
+          </div>
+        {% endif %}
+
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% include 'includes/form_fields.html' %}
+          <div class="d-flex gap-2 mt-4 pt-2 border-top">
+            <button class="btn btn-primary" type="submit">Save Changes</button>
+            <a class="btn btn-outline-secondary" href="{% url 'employer_profile' %}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="alert alert-light border small text-muted">
+      <strong>Note:</strong> Editing your company profile updates your public presentation. Your verification status and legal documents are managed independently and will not be affected by changes made here.
+    </div>
+  </div>
+</div>
+{% endblock %}

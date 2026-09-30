@@ -20,6 +20,13 @@ urlpatterns = [
     path("dashboard/", views.dashboard, name="dashboard"),
     path("dashboard/jobseeker/", views.jobseeker_dashboard, name="jobseeker_dashboard"),
     path("dashboard/employer/", views.employer_dashboard, name="employer_dashboard"),
+    # Employer profile & verification
+    path("employer/profile/", views.employer_profile, name="employer_profile"),
+    path("employer/profile/edit/", views.employer_profile_edit, name="employer_profile_edit"),
+    path("employer/verification/", views.employer_verification_submit, name="employer_verification_submit"),
+    path("employer/verification/<int:pk>/download/", views.verification_document_download, name="verification_document_download"),
+    # Public company profile
+    path("companies/<int:pk>/", views.company_detail, name="company_detail"),
     # CV management
     path("cvs/", views.cv_list, name="cv_list"),
     path("cvs/<int:pk>/download/", views.cv_download, name="cv_download"),
