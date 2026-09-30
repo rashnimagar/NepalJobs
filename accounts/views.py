@@ -101,6 +101,7 @@ def employer_dashboard(request):
             "rejection_reason": profile.rejection_reason,
             "has_verification_document": bool(profile.verification_document),
             "can_post_jobs": profile.is_approved,
+            "jobs_count": profile.jobs.count() if profile.is_approved else 0,
         },
     )
 

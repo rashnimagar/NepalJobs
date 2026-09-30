@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}
+  {% if action == 'edit' %}Edit Job - {{ job.title }}{% else %}Post a Job{% endif %} - NepalJobs
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-9">
+    <div class="mb-4">
+      <a href="{% if action == 'edit' %}{% url 'employer_job_detail' job.pk %}{% else %}{% url 'employer_job_list' %}{% endif %}" class="text-decoration-none small text-muted">
+        &larr; Back to {% if action == 'edit' %}Job Details{% else %}My Jobs{% endif %}
+      </a>
+      <h2 class="mt-2 mb-1">
+        {% if action == 'edit' %}Edit Job: {{ job.title }}{% else %}Post a New Job{% endif %}
+      </h2>
+      <p class="text-muted mb-0">
+        {% if action == 'edit' %}
+          Update your job listing details. Changes will be saved to your listing.
+        {% else %}
+          Fill in the details below. Newly created jobs are saved as drafts.
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4 p-md-5">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% include 'includes/form_fields.html' with form=form %}
+
+          <div class="d-flex justify-content-between align-items-center mt-4 pt-3 border-top">
+            <a href="{% if action == 'edit' %}{% url 'employer_job_detail' job.pk %}{% else %}{% url 'employer_job_list' %}{% endif %}" class="btn btn-outline-secondary">
+              Cancel
+            </a>
+            <button type="submit" class="btn btn-primary px-4">
+              {% if action == 'edit' %}Save Changes{% else %}Save Draft{% endif %}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -8,7 +8,11 @@
     <h2 class="mb-1">Employer Dashboard</h2>
     <p class="text-muted mb-0">Manage your company profile and monitor recruitment activities.</p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
+    {% if is_approved %}
+      <a class="btn btn-outline-success btn-sm" href="{% url 'employer_job_list' %}">My Jobs ({{ jobs_count }})</a>
+      <a class="btn btn-success btn-sm" href="{% url 'employer_job_create' %}">Post a Job</a>
+    {% endif %}
     <a class="btn btn-outline-primary btn-sm" href="{% url 'employer_profile' %}">View Profile</a>
     <a class="btn btn-primary btn-sm" href="{% url 'employer_profile_edit' %}">Edit Company</a>
   </div>
@@ -199,6 +203,10 @@
       <div class="card-body p-4">
         <h5 class="mb-3">Quick Links</h5>
         <div class="d-grid gap-2">
+          {% if is_approved %}
+            <a class="btn btn-primary" href="{% url 'employer_job_create' %}">Post a Job</a>
+            <a class="btn btn-outline-success" href="{% url 'employer_job_list' %}">Manage Jobs ({{ jobs_count }})</a>
+          {% endif %}
           <a class="btn btn-outline-primary" href="{% url 'employer_profile' %}">View Full Profile</a>
           <a class="btn btn-outline-secondary" href="{% url 'employer_profile_edit' %}">Edit Company Details</a>
           {% if is_approved %}

@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ job.title }} - Employer Management - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'employer_job_list' %}" class="text-decoration-none small text-muted">
+    &larr; Back to My Jobs
+  </a>
+  <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mt-2 gap-3">
+    <div>
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <h2 class="mb-0">{{ job.title }}</h2>
+        {% if job.status == 'draft' %}
+          <span class="badge bg-secondary fs-6">Draft</span>
+        {% elif job.status == 'published' %}
+          {% if job.is_open %}
+            <span class="badge bg-success fs-6">Published (Open)</span>
+          {% else %}
+            <span class="badge bg-warning text-dark fs-6">Published (Expired)</span>
+          {% endif %}
+        {% elif job.status == 'closed' %}
+          <span class="badge bg-dark fs-6">Closed</span>
+        {% endif %}
+      </div>
+      <p class="text-muted mb-0">
+        {{ job.category.name }} &bull; {{ job.location.name }}{% if job.is_remote %} (Remote permitted){% endif %} &bull; {{ job.get_employment_type_display }}
+      </p>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="{% url 'employer_job_edit' job.pk %}" class="btn btn-outline-primary">Edit Job</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    {# Job Description Card #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Job Description</h5>
+        <div class="text-secondary mb-4" style="line-height: 1.7;">
+          {{ job.description|linebreaksbr }}
+        </div>
+
+        {% if job.responsibilities %}
+          <h5 class="fw-bold mb-3">Key Responsibilities</h5>
+          <div class="text-secondary" style="line-height: 1.7;">
+            {{ job.responsibilities|linebreaksbr }}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Required Skills Card #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Required Skills</h5>
+        {% if job.required_skills.all %}
+          <div class="d-flex flex-wrap gap-2">
+            {% for skill in job.required_skills.all %}
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 fs-6">
+                {{ skill.name }}
+              </span>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-muted mb-0">No specific skills listed for this position.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    {# Overview / Summary Card #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Position Overview</h5>
+
+        <div class="mb-3">
+          <div class="info-label">Category</div>
+          <div class="fw-medium">{{ job.category.name }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Location</div>
+          <div class="fw-medium">
+            {{ job.location.name }}
+            {% if job.is_remote %}
+              <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote Allowed</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Employment Type</div>
+          <div class="fw-medium">{{ job.get_employment_type_display }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Open Vacancies</div>
+          <div class="fw-medium">{{ job.vacancies }} position{{ job.vacancies|pluralize }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Offered Salary</div>
+          <div class="fw-medium">
+            {% if job.salary_min and job.salary_max %}
+              Rs. {{ job.salary_min }} – Rs. {{ job.salary_max }}
+              {% if job.is_salary_negotiable %}<span class="text-muted small">(Negotiable)</span>{% endif %}
+            {% elif job.salary_min %}
+              From Rs. {{ job.salary_min }}
+              {% if job.is_salary_negotiable %}<span class="text-muted small">(Negotiable)</span>{% endif %}
+            {% elif job.salary_max %}
+              Up to Rs. {{ job.salary_max }}
+              {% if job.is_salary_negotiable %}<span class="text-muted small">(Negotiable)</span>{% endif %}
+            {% elif job.is_salary_negotiable %}
+              Negotiable
+            {% else %}
+              <span class="text-muted">Not disclosed</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Minimum Experience</div>
+          <div class="fw-medium">
+            {% if job.experience_years_min > 0 %}
+              {{ job.experience_years_min }} year{{ job.experience_years_min|pluralize }}
+            {% else %}
+              Freshers / No prior experience required
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Minimum Education</div>
+          <div class="fw-medium">
+            {{ job.get_education_level_display|default:"Not specified" }}
+          </div>
+        </div>
+
+        <div class="mb-0">
+          <div class="info-label">Application Deadline</div>
+          <div class="fw-medium text-danger">
+            {{ job.application_deadline|date:"F d, Y" }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Audit & Lifecycle Card #}
+    <div class="card shadow-sm border-0">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Status & Tracking</h5>
+
+        <div class="mb-3">
+          <div class="info-label">Current Status</div>
+          <div class="fw-medium text-capitalize">{{ job.status }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Created Date</div>
+          <div class="text-muted small">{{ job.created_at|date:"M d, Y H:i" }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="info-label">Last Updated</div>
+          <div class="text-muted small">{{ job.updated_at|date:"M d, Y H:i" }}</div>
+        </div>
+
+        <div>
+          <div class="info-label">Published At</div>
+          <div class="text-muted small">
+            {% if job.published_at %}
+              {{ job.published_at|date:"M d, Y H:i" }}
+            {% else %}
+              Not published yet
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
