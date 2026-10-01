@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block title %}Apply for {{ job.title }} - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'job_detail' job.pk %}" class="text-decoration-none small text-muted">
+    &larr; Back to Job: {{ job.title }}
+  </a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4 p-md-5">
+        <h2 class="h3 fw-bold mb-1">Submit Application</h2>
+        <p class="text-muted mb-4">
+          Applying for <span class="fw-semibold text-dark">{{ job.title }}</span> at
+          <span class="fw-semibold text-dark">{{ job.employer.company_name }}</span>
+        </p>
+
+        <form method="post" action="{% url 'apply_job' job.pk %}">
+          {% csrf_token %}
+          {% include 'includes/form_fields.html' %}
+
+          <div class="d-flex justify-content-between align-items-center mt-2 mb-4 p-3 bg-light rounded border">
+            <span class="small text-muted">Need to upload or manage your resumes?</span>
+            <a href="{% url 'cv_list' %}" target="_blank" class="small fw-semibold text-decoration-none">
+              Manage My CVs &rarr;
+            </a>
+          </div>
+
+          <div class="d-flex align-items-center gap-2">
+            <button type="submit" class="btn btn-primary px-4 py-2 fw-semibold">
+              Submit Application
+            </button>
+            <a href="{% url 'job_detail' job.pk %}" class="btn btn-outline-secondary px-3 py-2">
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3 border-bottom pb-2">Position Summary</h5>
+
+        <div class="mb-3">
+          <div class="text-muted small">Company</div>
+          <div class="fw-semibold text-dark">{{ job.employer.company_name }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="text-muted small">Location</div>
+          <div class="fw-semibold text-dark">
+            {{ job.location.name }}
+            {% if job.is_remote %}
+              <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="text-muted small">Employment Type</div>
+          <div class="fw-semibold text-dark">{{ job.get_employment_type_display }}</div>
+        </div>
+
+        <div class="mb-3">
+          <div class="text-muted small">Salary</div>
+          <div class="fw-semibold text-success">{{ job.salary_display }}</div>
+        </div>
+
+        <div class="mb-0">
+          <div class="text-muted small">Application Deadline</div>
+          <div class="fw-semibold text-dark">{{ job.application_deadline|date:"M d, Y" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

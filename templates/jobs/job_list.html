@@ -1,0 +1,269 @@
+{% extends 'base.html' %}
+
+{% block title %}Explore Jobs in Nepal - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+  <div class="col-md-8">
+    <h1 class="h2 fw-bold mb-1">Discover Jobs in Nepal</h1>
+    <p class="text-muted mb-0">Browse verified career opportunities across top companies and industries.</p>
+  </div>
+  <div class="col-md-4 text-md-end mt-2 mt-md-0">
+    <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 fs-6">
+      {{ total_count }} Open Job{{ total_count|pluralize }}
+    </span>
+  </div>
+</div>
+
+<div class="row g-4">
+  {# Filter Sidebar #}
+  <div class="col-lg-4 col-xl-3">
+    <div class="card shadow-sm border-0 sticky-lg-top" style="top: 1rem; z-index: 10;">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="fw-bold mb-0">Filter Jobs</h5>
+          {% if has_filters %}
+            <a href="{% url 'job_list' %}" class="small text-danger text-decoration-none">Clear all</a>
+          {% endif %}
+        </div>
+
+        <form method="get" action="{% url 'job_list' %}">
+          {# Keyword Search #}
+          <div class="mb-3">
+            <label for="search-input" class="form-label info-label">Keyword Search</label>
+            <input type="text" id="search-input" name="q" class="form-control form-control-sm" placeholder="Title, skill, or keyword..." value="{{ current_q }}">
+          </div>
+
+          {# Category Filter #}
+          <div class="mb-3">
+            <label for="category-select" class="form-label info-label">Category</label>
+            <select id="category-select" name="category" class="form-select form-select-sm">
+              <option value="">All Categories</option>
+              {% for category in categories %}
+                <option value="{{ category.slug }}" {% if current_category == category.slug %}selected{% endif %}>
+                  {{ category.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          {# Location Filter #}
+          <div class="mb-3">
+            <label for="location-select" class="form-label info-label">Location</label>
+            <select id="location-select" name="location" class="form-select form-select-sm">
+              <option value="">All Locations</option>
+              {% for location in locations %}
+                <option value="{{ location.slug }}" {% if current_location == location.slug %}selected{% endif %}>
+                  {{ location.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          {# Employment Type Filter #}
+          <div class="mb-3">
+            <label for="employment-type-select" class="form-label info-label">Employment Type</label>
+            <select id="employment-type-select" name="employment_type" class="form-select form-select-sm">
+              <option value="">All Types</option>
+              {% for code, label in employment_types %}
+                <option value="{{ code }}" {% if current_employment_type == code %}selected{% endif %}>
+                  {{ label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          {# Remote Filter #}
+          <div class="mb-3">
+            <label for="remote-select" class="form-label info-label">Workplace</label>
+            <select id="remote-select" name="remote" class="form-select form-select-sm">
+              <option value="">All (Remote & On-site)</option>
+              <option value="remote" {% if current_remote == 'remote' %}selected{% endif %}>Remote Only</option>
+              <option value="onsite" {% if current_remote == 'onsite' %}selected{% endif %}>On-site Only</option>
+            </select>
+          </div>
+
+          {# Sort Option #}
+          <div class="mb-4">
+            <label for="sort-select" class="form-label info-label">Sort By</label>
+            <select id="sort-select" name="sort" class="form-select form-select-sm">
+              <option value="newest" {% if current_sort == 'newest' %}selected{% endif %}>Newest First</option>
+              <option value="deadline" {% if current_sort == 'deadline' %}selected{% endif %}>Deadline (Approaching Soon)</option>
+            </select>
+          </div>
+
+          <div class="d-grid gap-2">
+            <button type="submit" class="btn btn-primary btn-sm fw-semibold">Apply Filters</button>
+            {% if has_filters %}
+              <a href="{% url 'job_list' %}" class="btn btn-outline-secondary btn-sm">Reset Filters</a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {# Main Job Listings Column #}
+  <div class="col-lg-8 col-xl-9">
+    {% if has_filters %}
+      <div class="d-flex flex-wrap align-items-center justify-content-between bg-white p-3 rounded shadow-sm mb-3">
+        <div class="d-flex align-items-center flex-wrap gap-2">
+          <span class="text-muted small">Active Filters:</span>
+          {% if current_q %}
+            <span class="badge bg-light text-dark border">Keyword: "{{ current_q }}"</span>
+          {% endif %}
+          {% if current_category %}
+            <span class="badge bg-light text-dark border">Category: {{ current_category }}</span>
+          {% endif %}
+          {% if current_location %}
+            <span class="badge bg-light text-dark border">Location: {{ current_location }}</span>
+          {% endif %}
+          {% if current_employment_type %}
+            <span class="badge bg-light text-dark border">Type: {{ current_employment_type }}</span>
+          {% endif %}
+          {% if current_remote %}
+            <span class="badge bg-light text-dark border">{{ current_remote|title }}</span>
+          {% endif %}
+          {% if current_sort and current_sort != 'newest' %}
+            <span class="badge bg-light text-dark border">Sorted by: {{ current_sort }}</span>
+          {% endif %}
+        </div>
+        <div>
+          <a href="{% url 'job_list' %}" class="small text-danger text-decoration-none">Clear all</a>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if jobs %}
+      <div class="d-flex flex-column gap-3">
+        {% for job in jobs %}
+          <div class="card shadow-sm border-0 job-card">
+            <div class="card-body p-4">
+              <div class="d-flex flex-column flex-sm-row align-items-start gap-3">
+                {# Employer Logo #}
+                <div class="flex-shrink-0">
+                  {% if job.employer.logo %}
+                    <img src="{{ job.employer.logo.url }}" alt="{{ job.employer.company_name }} Logo" class="company-logo-lg">
+                  {% else %}
+                    <div class="company-logo-placeholder">{{ job.employer.company_name|slice:":1"|upper }}</div>
+                  {% endif %}
+                </div>
+
+                {# Job Info #}
+                <div class="flex-grow-1">
+                  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-2 mb-2">
+                    <div>
+                      <h2 class="h5 fw-bold mb-1">
+                        <a href="{% url 'job_detail' job.pk %}" class="text-decoration-none text-dark hover-primary">
+                          {{ job.title }}
+                        </a>
+                      </h2>
+                      <div class="text-muted small">
+                        <a href="{% url 'company_detail' job.employer.pk %}" class="text-decoration-none text-secondary fw-medium">
+                          {{ job.employer.company_name }}
+                        </a>
+                        &bull; {{ job.location.name }}
+                        {% if job.is_remote %}
+                          <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+                        {% endif %}
+                      </div>
+                    </div>
+                    <div class="text-md-end">
+                      <span class="badge bg-light text-dark border">{{ job.get_employment_type_display }}</span>
+                    </div>
+                  </div>
+
+                  {# Job Excerpt #}
+                  <p class="text-secondary small mb-3" style="line-height: 1.6;">
+                    {{ job.description|truncatewords:25 }}
+                  </p>
+
+                  {# Tags / Skills #}
+                  <div class="d-flex flex-wrap align-items-center gap-1 mb-3">
+                    <span class="badge bg-light text-muted border me-1">{{ job.category.name }}</span>
+                    {% for skill in job.required_skills.all|slice:":4" %}
+                      <span class="badge bg-primary-subtle text-primary border border-primary-subtle">{{ skill.name }}</span>
+                    {% endfor %}
+                  </div>
+
+                  {# Card Footer Metadata #}
+                  <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center pt-3 border-top gap-2">
+                    <div class="d-flex flex-wrap align-items-center gap-3 small text-muted">
+                      <div>
+                        <strong class="text-dark">Salary:</strong> {{ job.salary_display }}
+                      </div>
+                      <div>
+                        <strong class="text-dark">Deadline:</strong> {{ job.application_deadline|date:"M d, Y" }}
+                      </div>
+                    </div>
+                    <div>
+                      <a href="{% url 'job_detail' job.pk %}" class="btn btn-primary btn-sm px-3">View Details</a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      {# Pagination #}
+      {% if page_obj.has_other_pages %}
+        <nav aria-label="Job listings pages" class="mt-4">
+          <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+              <li class="page-item">
+                <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}" aria-label="Previous">
+                  &laquo; Previous
+                </a>
+              </li>
+            {% else %}
+              <li class="page-item disabled"><span class="page-link">&laquo; Previous</span></li>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+              {% if page_obj.number == num %}
+                <li class="page-item active" aria-current="page"><span class="page-link">{{ num }}</span></li>
+              {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                <li class="page-item">
+                  <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ num }}">{{ num }}</a>
+                </li>
+              {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+              <li class="page-item">
+                <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}" aria-label="Next">
+                  Next &raquo;
+                </a>
+              </li>
+            {% else %}
+              <li class="page-item disabled"><span class="page-link">Next &raquo;</span></li>
+            {% endif %}
+          </ul>
+        </nav>
+      {% endif %}
+
+    {% else %}
+      {# Empty State #}
+      <div class="card shadow-sm border-0 text-center py-5">
+        <div class="card-body">
+          <div class="text-muted mb-3 fs-1">&#128269;</div>
+          {% if has_filters %}
+            <h4 class="fw-bold mb-2">No Matching Jobs Found</h4>
+            <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
+              We couldn't find any open jobs matching your filter criteria. Try broadening your keywords or removing some filters.
+            </p>
+            <a href="{% url 'job_list' %}" class="btn btn-primary">Clear All Filters</a>
+          {% else %}
+            <h4 class="fw-bold mb-2">No Jobs Currently Available</h4>
+            <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
+              There are currently no active job vacancies open on NepalJobs. Please check back soon as new openings are posted regularly!
+            </p>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

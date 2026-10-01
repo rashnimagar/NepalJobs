@@ -46,7 +46,7 @@
               </td>
               <td>{{ job.get_employment_type_display }}</td>
               <td>
-                <span class="small">{{ job.application_deadline|date:"M d, Y" }}</span>
+                <span class="small {% if job.status == 'published' and not job.is_open %}text-danger fw-semibold{% endif %}">{{ job.application_deadline|date:"M d, Y" }}</span>
               </td>
               <td>
                 {% if job.status == 'draft' %}
@@ -63,6 +63,7 @@
               </td>
               <td class="text-end pe-4">
                 <div class="btn-group btn-group-sm">
+                  <a href="{% url 'employer_job_applicants' job.pk %}" class="btn btn-outline-info">Applicants ({{ job.applications.count }})</a>
                   <a href="{% url 'employer_job_detail' job.pk %}" class="btn btn-outline-secondary">View</a>
                   <a href="{% url 'employer_job_edit' job.pk %}" class="btn btn-outline-primary">Edit</a>
                 </div>

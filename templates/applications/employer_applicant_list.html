@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+
+{% block title %}Applicants - {{ job.title }} - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'employer_job_detail' job.pk %}" class="text-decoration-none small text-muted">
+    &larr; Back to Job: {{ job.title }}
+  </a>
+</div>
+
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
+  <div>
+    <h2 class="mb-1">Applicants for {{ job.title }}</h2>
+    <p class="text-muted mb-0">
+      {{ applicants.count }} candidate{{ applicants.count|pluralize }} applied &bull; {{ job.location.name }} &bull; {{ job.get_employment_type_display }}
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{% url 'employer_job_detail' job.pk %}" class="btn btn-outline-secondary">Job Details</a>
+    <a href="{% url 'employer_job_list' %}" class="btn btn-outline-primary">My Jobs</a>
+  </div>
+</div>
+
+{% if applicants %}
+  <div class="card shadow-sm border-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col" class="ps-4">Candidate</th>
+            <th scope="col">Application Date</th>
+            <th scope="col">Status</th>
+            <th scope="col">Submitted Resume / CV</th>
+            <th scope="col" class="text-end pe-4">Cover Letter</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for app in applicants %}
+            <tr>
+              <td class="ps-4">
+                <div class="fw-semibold text-dark">
+                  {{ app.jobseeker.user.get_full_name|default:app.jobseeker.user.username }}
+                </div>
+                <div class="text-muted small">
+                  {{ app.jobseeker.user.email }}
+                  {% if app.jobseeker.phone %} &bull; {{ app.jobseeker.phone }}{% endif %}
+                </div>
+              </td>
+              <td>{{ app.created_at|date:"M d, Y" }}</td>
+              <td>
+                {% if app.status == 'applied' %}
+                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
+                {% elif app.status == 'under_review' %}
+                  <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
+                {% elif app.status == 'shortlisted' %}
+                  <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
+                {% elif app.status == 'interview' %}
+                  <span class="badge bg-primary text-white">Interview</span>
+                {% elif app.status == 'selected' %}
+                  <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
+                {% elif app.status == 'rejected' %}
+                  <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ app.get_status_display }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if app.cv %}
+                  <a href="{% url 'cv_download' app.cv.pk %}" class="btn btn-sm btn-outline-primary" target="_blank">
+                    &#128196; Download CV ({{ app.cv.original_filename }})
+                  </a>
+                {% else %}
+                  <span class="text-muted small">No CV attached</span>
+                {% endif %}
+              </td>
+              <td class="text-end pe-4">
+                {% if app.cover_letter %}
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#coverLetterModal{{ app.pk }}">
+                    View Letter
+                  </button>
+
+                  {# Cover Letter Modal #}
+                  <div class="modal fade" id="coverLetterModal{{ app.pk }}" tabindex="-1" aria-labelledby="coverLetterModalLabel{{ app.pk }}" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered text-start">
+                      <div class="modal-content">
+                        <div class="modal-header">
+                          <h5 class="modal-title" id="coverLetterModalLabel{{ app.pk }}">
+                            Cover Letter - {{ app.jobseeker.user.get_full_name|default:app.jobseeker.user.username }}
+                          </h5>
+                          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body text-secondary" style="line-height: 1.8;">
+                          {{ app.cover_letter|linebreaksbr }}
+                        </div>
+                        <div class="modal-footer">
+                          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                {% else %}
+                  <span class="text-muted small">None provided</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="card shadow-sm border-0 text-center py-5">
+    <div class="card-body">
+      <div class="text-muted mb-3 fs-1">&#128101;</div>
+      <h4 class="fw-bold mb-2">No Applicants Yet</h4>
+      <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
+        No candidates have applied for this position yet. Check back once jobseekers discover and submit applications.
+      </p>
+      <a class="btn btn-outline-primary" href="{% url 'employer_job_detail' job.pk %}">View Job Details</a>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

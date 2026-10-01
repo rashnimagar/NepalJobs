@@ -17,11 +17,13 @@
       </button>
       <div class="collapse navbar-collapse" id="mainNav">
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
+          <li class="nav-item"><a class="nav-link" href="{% url 'job_list' %}">Browse Jobs</a></li>
           {% if user.is_authenticated %}
             <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a></li>
             {% if user.is_jobseeker and not user.is_staff %}
               <li class="nav-item"><a class="nav-link" href="{% url 'profile' %}">My Profile</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'cv_list' %}">My CVs</a></li>
+              <li class="nav-item"><a class="nav-link" href="{% url 'jobseeker_application_list' %}">My Applications</a></li>
             {% elif user.is_employer and not user.is_staff %}
               <li class="nav-item"><a class="nav-link" href="{% url 'employer_profile' %}">Company Profile</a></li>
             {% endif %}

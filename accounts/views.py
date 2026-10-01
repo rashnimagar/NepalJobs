@@ -258,11 +258,21 @@ def cv_delete(request, pk):
 @login_required
 def cv_download(request, pk):
     cv = get_object_or_404(CV, pk=pk)
-    # Only the owner for now. Employers get access in the applications step,
-    # and only for CVs submitted to their own jobs.
-    if not (request.user.is_jobseeker and cv.profile.user_id == request.user.id):
+    is_owner = request.user.is_jobseeker and hasattr(request.user, "jobseeker_profile") and cv.profile.user_id == request.user.id
+    is_staff = request.user.is_staff or request.user.is_superuser
+    is_authorized_employer = (
+        request.user.is_employer
+        and hasattr(request.user, "employer_profile")
+        and request.user.employer_profile.is_approved
+        and cv.applications.filter(job__employer=request.user.employer_profile).exists()
+    )
+    if not (is_owner or is_staff or is_authorized_employer):
         raise PermissionDenied
-    return FileResponse(cv.file.open("rb"), filename=cv.original_filename)
+    try:
+        file_obj = cv.file.open("rb")
+    except (FileNotFoundError, ValueError):
+        raise Http404("CV file missing.")
+    return FileResponse(file_obj, filename=cv.original_filename)
 
 @jobseeker_required
 def skills_edit(request):

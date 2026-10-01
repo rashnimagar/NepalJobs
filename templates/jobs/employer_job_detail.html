@@ -27,11 +27,33 @@
         {{ job.category.name }} &bull; {{ job.location.name }}{% if job.is_remote %} (Remote permitted){% endif %} &bull; {{ job.get_employment_type_display }}
       </p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <a href="{% url 'employer_job_applicants' job.pk %}" class="btn btn-outline-info">
+        Applicants ({{ job.applications.count }})
+      </a>
       <a href="{% url 'employer_job_edit' job.pk %}" class="btn btn-outline-primary">Edit Job</a>
+      {% if job.status == 'draft' %}
+        <form method="post" action="{% url 'employer_job_publish' job.pk %}" class="d-inline" onsubmit="return confirm('Publish this job?');">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-success">Publish Job</button>
+        </form>
+      {% elif job.status == 'published' %}
+        <form method="post" action="{% url 'employer_job_close' job.pk %}" class="d-inline" onsubmit="return confirm('Close this job?');">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">Close Job</button>
+        </form>
+      {% endif %}
     </div>
   </div>
 </div>
+
+{% if job.status == 'published' and not job.is_open %}
+  <div class="alert alert-warning d-flex align-items-center mb-4" role="alert">
+    <div>
+      <strong>Notice:</strong> The application deadline ({{ job.application_deadline|date:"M d, Y" }}) for this job has passed. This job is expired and is no longer open to applicants.
+    </div>
+  </div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-8">
@@ -142,8 +164,11 @@
 
         <div class="mb-0">
           <div class="info-label">Application Deadline</div>
-          <div class="fw-medium text-danger">
+          <div class="fw-medium {% if job.status == 'published' and not job.is_open %}text-danger{% endif %}">
             {{ job.application_deadline|date:"F d, Y" }}
+            {% if job.status == 'published' and not job.is_open %}
+              <span class="badge bg-danger-subtle text-danger ms-1">Deadline Passed</span>
+            {% endif %}
           </div>
         </div>
       </div>

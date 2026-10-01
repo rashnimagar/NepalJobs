@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block title %}My Applications - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
+  <div>
+    <h2 class="mb-1">My Applications</h2>
+    <p class="text-muted mb-0">Track the status of all your submitted job applications.</p>
+  </div>
+  <div>
+    <a href="{% url 'job_list' %}" class="btn btn-primary">Browse Jobs</a>
+  </div>
+</div>
+
+{% if applications %}
+  <div class="card shadow-sm border-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col" class="ps-4">Job Title & Company</th>
+            <th scope="col">Location</th>
+            <th scope="col">Applied Date</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="text-end pe-4">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for app in applications %}
+            <tr>
+              <td class="ps-4">
+                <a href="{% url 'jobseeker_application_detail' app.pk %}" class="fw-semibold text-decoration-none text-dark">
+                  {{ app.job.title }}
+                </a>
+                <div class="text-muted small">
+                  {{ app.job.employer.company_name }}
+                </div>
+              </td>
+              <td>
+                {{ app.job.location.name }}
+                {% if app.job.is_remote %}
+                  <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+                {% endif %}
+              </td>
+              <td>{{ app.created_at|date:"M d, Y" }}</td>
+              <td>
+                {% if app.status == 'applied' %}
+                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
+                {% elif app.status == 'under_review' %}
+                  <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
+                {% elif app.status == 'shortlisted' %}
+                  <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
+                {% elif app.status == 'interview' %}
+                  <span class="badge bg-primary text-white">Interview</span>
+                {% elif app.status == 'selected' %}
+                  <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
+                {% elif app.status == 'rejected' %}
+                  <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ app.get_status_display }}</span>
+                {% endif %}
+              </td>
+              <td class="text-end pe-4">
+                <a href="{% url 'jobseeker_application_detail' app.pk %}" class="btn btn-outline-secondary btn-sm">
+                  View Detail
+                </a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="card shadow-sm border-0 text-center py-5">
+    <div class="card-body">
+      <div class="text-muted mb-3 fs-1">&#128196;</div>
+      <h4 class="fw-bold mb-2">No Applications Submitted Yet</h4>
+      <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
+        You haven't submitted any job applications yet. Discover verified open positions across Nepal and apply with your uploaded CV.
+      </p>
+      <a class="btn btn-primary" href="{% url 'job_list' %}">Browse Open Jobs</a>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

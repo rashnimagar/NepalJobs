@@ -1266,3 +1266,1108 @@ class EmployerJobViewUITests(TestCase):
         self.assertIn(reverse("employer_job_create"), content)
         self.assertIn(reverse("employer_job_list"), content)
         self.assertIn("My Jobs (1)", content)
+
+
+class EmployerJobPublishAuthTests(TestCase):
+    def setUp(self):
+        self.approved_employer = make_approved_employer(username="pub_app", email="pub_app@example.com")
+        self.pending_employer = make_pending_employer(username="pub_pend", email="pub_pend@example.com")
+        self.rejected_employer = make_rejected_employer(username="pub_rej", email="pub_rej@example.com")
+        self.jobseeker = make_jobseeker(username="pub_js", email="pub_js@example.com")
+        self.category = make_category(name="Pub Cat", slug="pub-cat")
+        self.location = make_location(name="Pub Loc", slug="pub-loc")
+        self.job = Job.objects.create(
+            employer=self.approved_employer,
+            category=self.category,
+            location=self.location,
+            title="Publishable Job",
+            description="Job description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.DRAFT,
+        )
+
+    def test_anonymous_cannot_publish(self):
+        response = self.client.post(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DRAFT)
+
+    def test_jobseeker_cannot_publish(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DRAFT)
+
+    def test_pending_employer_cannot_publish(self):
+        self.client.force_login(self.pending_employer.user)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DRAFT)
+
+    def test_rejected_employer_cannot_publish(self):
+        self.client.force_login(self.rejected_employer.user)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DRAFT)
+
+    def test_employer_without_profile_cannot_publish(self):
+        user_no_profile = User.objects.create_user(
+            username="pub_no_profile", email="pub_no_profile@example.com", password="Password123!", role=User.Role.EMPLOYER
+        )
+        self.client.force_login(user_no_profile)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DRAFT)
+
+    def test_approved_employer_can_publish_valid_draft(self):
+        self.client.force_login(self.approved_employer.user)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[self.job.pk]))
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+        self.assertIsNotNone(self.job.published_at)
+
+
+class EmployerJobPublishOwnershipTests(TestCase):
+    def setUp(self):
+        self.emp_a = make_approved_employer(username="own_pub_a", email="own_pub_a@example.com")
+        self.emp_b = make_approved_employer(username="own_pub_b", email="own_pub_b@example.com")
+        self.category = make_category(name="Own Pub Cat", slug="own-pub-cat")
+        self.location = make_location(name="Own Pub Loc", slug="own-pub-loc")
+        self.job_b = Job.objects.create(
+            employer=self.emp_b,
+            category=self.category,
+            location=self.location,
+            title="Employer B Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.DRAFT,
+        )
+
+    def test_employer_cannot_publish_another_employer_job(self):
+        self.client.force_login(self.emp_a.user)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job_b.pk]))
+        self.assertEqual(response.status_code, 404)
+        self.job_b.refresh_from_db()
+        self.assertEqual(self.job_b.status, Job.Status.DRAFT)
+
+    def test_cross_employer_publish_returns_404(self):
+        self.client.force_login(self.emp_a.user)
+        response = self.client.post(reverse("employer_job_publish", args=[self.job_b.pk]))
+        self.assertEqual(response.status_code, 404)
+
+
+class EmployerJobPublishLifecycleTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="life_pub", email="life_pub@example.com")
+        self.category = make_category(name="Life Pub Cat", slug="life-pub-cat")
+        self.location = make_location(name="Life Pub Loc", slug="life-pub-loc")
+        self.draft_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Draft Lifecycle Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=15),
+            status=Job.Status.DRAFT,
+        )
+        self.client.force_login(self.employer.user)
+
+    def test_valid_draft_to_published(self):
+        response = self.client.post(reverse("employer_job_publish", args=[self.draft_job.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[self.draft_job.pk]))
+        self.draft_job.refresh_from_db()
+        self.assertEqual(self.draft_job.status, Job.Status.PUBLISHED)
+
+    def test_published_at_set_by_publish(self):
+        before = timezone.now()
+        self.client.post(reverse("employer_job_publish", args=[self.draft_job.pk]))
+        after = timezone.now()
+        self.draft_job.refresh_from_db()
+        self.assertIsNotNone(self.draft_job.published_at)
+        self.assertTrue(before <= self.draft_job.published_at <= after)
+
+    def test_published_job_becomes_open_when_deadline_valid(self):
+        self.client.post(reverse("employer_job_publish", args=[self.draft_job.pk]))
+        self.draft_job.refresh_from_db()
+        self.assertTrue(self.draft_job.is_open)
+        self.assertIn(self.draft_job, Job.objects.open_jobs())
+
+    def test_publishing_already_published_job(self):
+        self.client.post(reverse("employer_job_publish", args=[self.draft_job.pk]))
+        self.draft_job.refresh_from_db()
+        self.assertEqual(self.draft_job.status, Job.Status.PUBLISHED)
+        response = self.client.post(reverse("employer_job_publish", args=[self.draft_job.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.draft_job.refresh_from_db()
+        self.assertEqual(self.draft_job.status, Job.Status.PUBLISHED)
+
+    def test_publishing_closed_job(self):
+        self.draft_job.status = Job.Status.CLOSED
+        self.draft_job.save()
+        response = self.client.post(reverse("employer_job_publish", args=[self.draft_job.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.draft_job.refresh_from_db()
+        self.assertEqual(self.draft_job.status, Job.Status.PUBLISHED)
+
+
+class EmployerJobPublishDeadlineValidationTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="dl_pub", email="dl_pub@example.com")
+        self.category = make_category(name="DL Pub Cat", slug="dl-pub-cat")
+        self.location = make_location(name="DL Pub Loc", slug="dl-pub-loc")
+        self.client.force_login(self.employer.user)
+
+    def test_draft_with_past_deadline_cannot_be_published(self):
+        past_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Past Deadline Job",
+            description="Description",
+            application_deadline=timezone.localdate() - timedelta(days=2),
+            status=Job.Status.DRAFT,
+        )
+        response = self.client.post(reverse("employer_job_publish", args=[past_job.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[past_job.pk]))
+        past_job.refresh_from_db()
+        self.assertEqual(past_job.status, Job.Status.DRAFT)
+        self.assertIsNone(past_job.published_at)
+        messages = list(response.wsgi_request._messages)
+        self.assertTrue(any("Application deadline must be today or a future date." in str(m) for m in messages))
+
+    def test_draft_with_today_deadline_can_be_published(self):
+        today_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Today Deadline Job",
+            description="Description",
+            application_deadline=timezone.localdate(),
+            status=Job.Status.DRAFT,
+        )
+        response = self.client.post(reverse("employer_job_publish", args=[today_job.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[today_job.pk]))
+        today_job.refresh_from_db()
+        self.assertEqual(today_job.status, Job.Status.PUBLISHED)
+        self.assertTrue(today_job.is_open)
+
+    def test_failed_publication_does_not_incorrectly_change_status(self):
+        past_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Failed Pub Status Check",
+            description="Description",
+            application_deadline=timezone.localdate() - timedelta(days=5),
+            status=Job.Status.DRAFT,
+        )
+        self.client.post(reverse("employer_job_publish", args=[past_job.pk]))
+        past_job.refresh_from_db()
+        self.assertEqual(past_job.status, Job.Status.DRAFT)
+        self.assertIsNone(past_job.published_at)
+        self.assertFalse(past_job.is_open)
+
+
+class EmployerJobCloseAuthTests(TestCase):
+    def setUp(self):
+        self.approved_employer = make_approved_employer(username="cls_app", email="cls_app@example.com")
+        self.pending_employer = make_pending_employer(username="cls_pend", email="cls_pend@example.com")
+        self.rejected_employer = make_rejected_employer(username="cls_rej", email="cls_rej@example.com")
+        self.jobseeker = make_jobseeker(username="cls_js", email="cls_js@example.com")
+        self.category = make_category(name="Cls Cat", slug="cls-cat")
+        self.location = make_location(name="Cls Loc", slug="cls-loc")
+        self.job = Job.objects.create(
+            employer=self.approved_employer,
+            category=self.category,
+            location=self.location,
+            title="Job to Close",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_anonymous_cannot_close(self):
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+
+    def test_jobseeker_cannot_close(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+
+    def test_pending_employer_cannot_close(self):
+        self.client.force_login(self.pending_employer.user)
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+
+    def test_rejected_employer_cannot_close(self):
+        self.client.force_login(self.rejected_employer.user)
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+
+    def test_employer_without_profile_cannot_close(self):
+        user_no_profile = User.objects.create_user(
+            username="cls_no_profile", email="cls_no_profile@example.com", password="Password123!", role=User.Role.EMPLOYER
+        )
+        self.client.force_login(user_no_profile)
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+
+    def test_approved_employer_can_close_owned_published_job(self):
+        self.client.force_login(self.approved_employer.user)
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[self.job.pk]))
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.CLOSED)
+
+
+class EmployerJobCloseOwnershipTests(TestCase):
+    def setUp(self):
+        self.emp_a = make_approved_employer(username="cls_own_a", email="cls_own_a@example.com")
+        self.emp_b = make_approved_employer(username="cls_own_b", email="cls_own_b@example.com")
+        self.category = make_category(name="Cls Own Cat", slug="cls-own-cat")
+        self.location = make_location(name="Cls Own Loc", slug="cls-own-loc")
+        self.job_b = Job.objects.create(
+            employer=self.emp_b,
+            category=self.category,
+            location=self.location,
+            title="Employer B Published Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_employer_cannot_close_another_employer_job(self):
+        self.client.force_login(self.emp_a.user)
+        response = self.client.post(reverse("employer_job_close", args=[self.job_b.pk]))
+        self.assertEqual(response.status_code, 404)
+        self.job_b.refresh_from_db()
+        self.assertEqual(self.job_b.status, Job.Status.PUBLISHED)
+
+    def test_cross_employer_close_returns_404(self):
+        self.client.force_login(self.emp_a.user)
+        response = self.client.post(reverse("employer_job_close", args=[self.job_b.pk]))
+        self.assertEqual(response.status_code, 404)
+
+
+class EmployerJobCloseLifecycleTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="cls_life", email="cls_life@example.com")
+        self.category = make_category(name="Cls Life Cat", slug="cls-life-cat")
+        self.location = make_location(name="Cls Life Loc", slug="cls-life-loc")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Published Life Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=1),
+        )
+        self.client.force_login(self.employer.user)
+
+    def test_published_to_closed(self):
+        response = self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[self.job.pk]))
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.CLOSED)
+
+    def test_closed_job_is_not_open(self):
+        self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.job.refresh_from_db()
+        self.assertFalse(self.job.is_open)
+        self.assertNotIn(self.job, Job.objects.open_jobs())
+
+    def test_closing_does_not_alter_employer_ownership(self):
+        self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.employer, self.employer)
+
+    def test_closing_preserves_audit_fields(self):
+        original_created_at = self.job.created_at
+        original_published_at = self.job.published_at
+        self.client.post(reverse("employer_job_close", args=[self.job.pk]))
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.created_at, original_created_at)
+        self.assertEqual(self.job.published_at, original_published_at)
+
+
+class EmployerJobExpirationTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="exp_emp", email="exp_emp@example.com")
+        self.category = make_category(name="Exp Cat", slug="exp-cat")
+        self.location = make_location(name="Exp Loc", slug="exp-loc")
+        self.expired_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Expired Published Job",
+            description="Description",
+            application_deadline=timezone.localdate() - timedelta(days=1),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=5),
+        )
+
+    def test_published_job_with_past_deadline_is_not_open(self):
+        self.assertFalse(self.expired_job.is_open)
+
+    def test_expired_published_job_excluded_from_open_jobs(self):
+        self.assertNotIn(self.expired_job, Job.objects.open_jobs())
+
+    def test_expired_published_job_included_in_expired_jobs(self):
+        self.assertIn(self.expired_job, Job.objects.expired_jobs())
+
+
+class EmployerJobHttpMethodTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="method_emp", email="method_emp@example.com")
+        self.category = make_category(name="Method Cat", slug="method-cat")
+        self.location = make_location(name="Method Loc", slug="method-loc")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Method Test Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.DRAFT,
+        )
+        self.client.force_login(self.employer.user)
+
+    def test_get_publish_endpoint_is_rejected_with_405(self):
+        response = self.client.get(reverse("employer_job_publish", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 405)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DRAFT)
+
+    def test_get_close_endpoint_is_rejected_with_405(self):
+        self.job.status = Job.Status.PUBLISHED
+        self.job.save()
+        response = self.client.get(reverse("employer_job_close", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 405)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.PUBLISHED)
+
+
+class EmployerJobLifecycleUITests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="ui_emp", email="ui_emp@example.com")
+        self.category = make_category(name="UI Cat", slug="ui-cat")
+        self.location = make_location(name="UI Loc", slug="ui-loc")
+        self.draft_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="UI Draft Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.DRAFT,
+        )
+        self.published_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="UI Published Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.expired_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="UI Expired Job",
+            description="Description",
+            application_deadline=timezone.localdate() - timedelta(days=2),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=10),
+        )
+        self.closed_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="UI Closed Job",
+            description="Description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.CLOSED,
+        )
+        self.client.force_login(self.employer.user)
+
+    def test_draft_detail_displays_publish_action(self):
+        response = self.client.get(reverse("employer_job_detail", args=[self.draft_job.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Publish Job", content)
+        self.assertIn(reverse("employer_job_publish", args=[self.draft_job.pk]), content)
+        self.assertNotIn(reverse("employer_job_close", args=[self.draft_job.pk]), content)
+
+    def test_published_detail_displays_close_action(self):
+        response = self.client.get(reverse("employer_job_detail", args=[self.published_job.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Close Job", content)
+        self.assertIn(reverse("employer_job_close", args=[self.published_job.pk]), content)
+        self.assertNotIn(reverse("employer_job_publish", args=[self.published_job.pk]), content)
+
+    def test_closed_detail_does_not_display_publish_or_close(self):
+        response = self.client.get(reverse("employer_job_detail", args=[self.closed_job.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertNotIn("Publish Job", content)
+        self.assertNotIn(reverse("employer_job_publish", args=[self.closed_job.pk]), content)
+        self.assertNotIn("Close Job", content)
+        self.assertNotIn(reverse("employer_job_close", args=[self.closed_job.pk]), content)
+
+    def test_expired_detail_displays_expired_warning_and_close_action(self):
+        response = self.client.get(reverse("employer_job_detail", args=[self.expired_job.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Published (Expired)", content)
+        self.assertIn("Deadline Passed", content)
+        self.assertIn("The application deadline", content)
+        self.assertIn("Close Job", content)
+
+    def test_employer_job_list_displays_lifecycle_statuses(self):
+        response = self.client.get(reverse("employer_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Draft", content)
+        self.assertIn("Open", content)
+        self.assertIn("Expired", content)
+        self.assertIn("Closed", content)
+
+
+# =====================================================================
+# STEP 6.5 — PUBLIC JOB DISCOVERY & JOB DETAIL TESTS
+# =====================================================================
+
+class PublicJobListAccessTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="access_emp", email="access_emp@example.com")
+        self.jobseeker = make_jobseeker(username="access_js", email="access_js@example.com")
+        self.category = make_category(name="IT Access", slug="it-access")
+        self.location = make_location(name="Access Loc", slug="access-loc")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Access Test Job",
+            description="Access description",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_anonymous_user_can_access_job_list(self):
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "jobs/job_list.html")
+        self.assertIn("Access Test Job", response.content.decode())
+
+    def test_jobseeker_can_access_job_list(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Access Test Job", response.content.decode())
+
+    def test_employer_can_access_job_list(self):
+        self.client.force_login(self.employer.user)
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Access Test Job", response.content.decode())
+
+
+class PublicJobListVisibilityTests(TestCase):
+    def setUp(self):
+        self.approved_emp = make_approved_employer(username="vis_app", email="vis_app@example.com")
+        self.pending_emp = make_pending_employer(username="vis_pend", email="vis_pend@example.com")
+        self.rejected_emp = make_rejected_employer(username="vis_rej", email="vis_rej@example.com")
+        self.category = make_category(name="Vis Cat", slug="vis-cat")
+        self.location = make_location(name="Vis Loc", slug="vis-loc")
+
+        # 1. Open published job
+        self.open_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Open Published Job",
+            description="Open description",
+            application_deadline=timezone.localdate() + timedelta(days=7),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        # 2. Draft job
+        self.draft_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Draft Hidden Job",
+            description="Draft description",
+            application_deadline=timezone.localdate() + timedelta(days=7),
+            status=Job.Status.DRAFT,
+        )
+        # 3. Closed job
+        self.closed_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Closed Hidden Job",
+            description="Closed description",
+            application_deadline=timezone.localdate() + timedelta(days=7),
+            status=Job.Status.CLOSED,
+            published_at=timezone.now() - timedelta(days=5),
+        )
+        # 4. Expired published job
+        self.expired_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Expired Hidden Job",
+            description="Expired description",
+            application_deadline=timezone.localdate() - timedelta(days=1),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=10),
+        )
+        # 5. Published job with pending employer
+        self.pending_emp_job = Job.objects.create(
+            employer=self.pending_emp,
+            category=self.category,
+            location=self.location,
+            title="Pending Employer Hidden Job",
+            description="Pending description",
+            application_deadline=timezone.localdate() + timedelta(days=7),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        # 6. Published job with rejected employer
+        self.rejected_emp_job = Job.objects.create(
+            employer=self.rejected_emp,
+            category=self.category,
+            location=self.location,
+            title="Rejected Employer Hidden Job",
+            description="Rejected description",
+            application_deadline=timezone.localdate() + timedelta(days=7),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_open_published_job_appears_in_listing(self):
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        jobs = response.context["jobs"]
+        self.assertIn(self.open_job, jobs)
+
+    def test_draft_job_does_not_appear_in_listing(self):
+        response = self.client.get(reverse("job_list"))
+        jobs = response.context["jobs"]
+        self.assertNotIn(self.draft_job, jobs)
+
+    def test_closed_job_does_not_appear_in_listing(self):
+        response = self.client.get(reverse("job_list"))
+        jobs = response.context["jobs"]
+        self.assertNotIn(self.closed_job, jobs)
+
+    def test_expired_published_job_does_not_appear_in_listing(self):
+        response = self.client.get(reverse("job_list"))
+        jobs = response.context["jobs"]
+        self.assertNotIn(self.expired_job, jobs)
+
+    def test_published_job_from_unapproved_employer_does_not_appear(self):
+        response = self.client.get(reverse("job_list"))
+        jobs = response.context["jobs"]
+        self.assertNotIn(self.pending_emp_job, jobs)
+        self.assertNotIn(self.rejected_emp_job, jobs)
+
+
+class PublicJobDetailVisibilityTests(TestCase):
+    def setUp(self):
+        self.approved_emp = make_approved_employer(username="dtl_app", email="dtl_app@example.com")
+        self.pending_emp = make_pending_employer(username="dtl_pend", email="dtl_pend@example.com")
+        self.category = make_category(name="Dtl Cat", slug="dtl-cat")
+        self.location = make_location(name="Dtl Loc", slug="dtl-loc")
+
+        self.open_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Public Open Detail Job",
+            description="Detail description",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.draft_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Draft Secret Job",
+            description="Secret draft",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.DRAFT,
+        )
+        self.closed_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Closed Archived Job",
+            description="Archived closed",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.CLOSED,
+            published_at=timezone.now() - timedelta(days=5),
+        )
+        self.expired_job = Job.objects.create(
+            employer=self.approved_emp,
+            category=self.category,
+            location=self.location,
+            title="Expired Old Job",
+            description="Expired old",
+            application_deadline=timezone.localdate() - timedelta(days=1),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=10),
+        )
+        self.unapproved_job = Job.objects.create(
+            employer=self.pending_emp,
+            category=self.category,
+            location=self.location,
+            title="Unapproved Employer Job",
+            description="Pending emp",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_open_job_detail_is_accessible_to_public(self):
+        response = self.client.get(reverse("job_detail", args=[self.open_job.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "jobs/job_detail.html")
+        self.assertEqual(response.context["job"], self.open_job)
+
+    def test_draft_detail_returns_404(self):
+        response = self.client.get(reverse("job_detail", args=[self.draft_job.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_closed_detail_returns_404(self):
+        response = self.client.get(reverse("job_detail", args=[self.closed_job.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_expired_detail_returns_404(self):
+        response = self.client.get(reverse("job_detail", args=[self.expired_job.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_job_from_unapproved_employer_returns_404(self):
+        response = self.client.get(reverse("job_detail", args=[self.unapproved_job.pk]))
+        self.assertEqual(response.status_code, 404)
+
+
+class PublicJobSearchTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="search_emp", email="search_emp@example.com")
+        self.cat_dev = make_category(name="Software Engineering", slug="software-eng")
+        self.cat_mkt = make_category(name="Digital Marketing", slug="digital-marketing")
+        self.loc_ktm = make_location(name="Kathmandu Hub", slug="kathmandu-hub")
+        self.loc_pok = make_location(name="Pokhara Valley", slug="pokhara-valley")
+
+        self.skill_python = Skill.objects.create(name="Python")
+        self.skill_react = Skill.objects.create(name="React")
+
+        self.job1 = Job.objects.create(
+            employer=self.employer,
+            category=self.cat_dev,
+            location=self.loc_ktm,
+            title="Senior Python Backend Developer",
+            description="Build scalable APIs using Django and PostgreSQL.",
+            responsibilities="Maintain system architecture and lead code reviews.",
+            application_deadline=timezone.localdate() + timedelta(days=20),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.job1.required_skills.add(self.skill_python)
+
+        self.job2 = Job.objects.create(
+            employer=self.employer,
+            category=self.cat_mkt,
+            location=self.loc_pok,
+            title="Social Media Manager",
+            description="Manage social accounts and content creation.",
+            responsibilities="Engage with audience and track campaign metrics.",
+            application_deadline=timezone.localdate() + timedelta(days=15),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_search_matches_title(self):
+        response = self.client.get(reverse("job_list"), {"q": "Python"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job1, jobs)
+        self.assertNotIn(self.job2, jobs)
+
+    def test_search_matches_description(self):
+        response = self.client.get(reverse("job_list"), {"q": "PostgreSQL"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job1, jobs)
+        self.assertNotIn(self.job2, jobs)
+
+    def test_search_matches_responsibilities(self):
+        response = self.client.get(reverse("job_list"), {"q": "architecture"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job1, jobs)
+        self.assertNotIn(self.job2, jobs)
+
+    def test_search_is_case_insensitive(self):
+        response = self.client.get(reverse("job_list"), {"q": "python"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job1, jobs)
+
+        response_upper = self.client.get(reverse("job_list"), {"q": "PYTHON"})
+        jobs_upper = list(response_upper.context["jobs"])
+        self.assertIn(self.job1, jobs_upper)
+
+    def test_non_matching_search_returns_empty(self):
+        response = self.client.get(reverse("job_list"), {"q": "NonExistentKeywordXYZ"})
+        self.assertEqual(len(response.context["jobs"]), 0)
+
+    def test_search_matches_category_name(self):
+        response = self.client.get(reverse("job_list"), {"q": "Software"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job1, jobs)
+        self.assertNotIn(self.job2, jobs)
+
+    def test_search_matches_location_name(self):
+        response = self.client.get(reverse("job_list"), {"q": "Pokhara"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job2, jobs)
+        self.assertNotIn(self.job1, jobs)
+
+    def test_search_matches_required_skill(self):
+        response = self.client.get(reverse("job_list"), {"q": "Python"})
+        jobs = list(response.context["jobs"])
+        self.assertIn(self.job1, jobs)
+
+    def test_empty_or_whitespace_search_returns_all_open_jobs(self):
+        response = self.client.get(reverse("job_list"), {"q": "   "})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 2)
+        self.assertIn(self.job1, jobs)
+        self.assertIn(self.job2, jobs)
+
+
+class PublicJobFilterTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="filter_emp", email="filter_emp@example.com")
+        self.cat_dev = make_category(name="Development", slug="development")
+        self.cat_des = make_category(name="Design", slug="design")
+        self.cat_inactive = Category.objects.create(name="Inactive Cat", slug="inactive-cat", is_active=False)
+
+        self.loc_ktm = make_location(name="KTM", slug="ktm")
+        self.loc_btl = make_location(name="Butwal", slug="butwal")
+
+        self.job_dev_full_remote = Job.objects.create(
+            employer=self.employer,
+            category=self.cat_dev,
+            location=self.loc_ktm,
+            title="Fullstack Django Dev",
+            description="Fullstack role",
+            employment_type=Job.EmploymentType.FULL_TIME,
+            is_remote=True,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.job_dev_part_onsite = Job.objects.create(
+            employer=self.employer,
+            category=self.cat_dev,
+            location=self.loc_ktm,
+            title="Part-time Python Tutor",
+            description="Tutor role",
+            employment_type=Job.EmploymentType.PART_TIME,
+            is_remote=False,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.job_des_contract = Job.objects.create(
+            employer=self.employer,
+            category=self.cat_des,
+            location=self.loc_btl,
+            title="Contract UI Designer",
+            description="Design role",
+            employment_type=Job.EmploymentType.CONTRACT,
+            is_remote=True,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_category_filter(self):
+        response = self.client.get(reverse("job_list"), {"category": "development"})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 2)
+        self.assertIn(self.job_dev_full_remote, jobs)
+        self.assertIn(self.job_dev_part_onsite, jobs)
+        self.assertNotIn(self.job_des_contract, jobs)
+
+    def test_location_filter(self):
+        response = self.client.get(reverse("job_list"), {"location": "butwal"})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 1)
+        self.assertIn(self.job_des_contract, jobs)
+
+    def test_employment_type_filter(self):
+        response = self.client.get(reverse("job_list"), {"employment_type": Job.EmploymentType.FULL_TIME})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 1)
+        self.assertIn(self.job_dev_full_remote, jobs)
+
+    def test_remote_filter_remote_only(self):
+        response = self.client.get(reverse("job_list"), {"remote": "remote"})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 2)
+        self.assertIn(self.job_dev_full_remote, jobs)
+        self.assertIn(self.job_des_contract, jobs)
+        self.assertNotIn(self.job_dev_part_onsite, jobs)
+
+    def test_remote_filter_onsite_only(self):
+        response = self.client.get(reverse("job_list"), {"remote": "onsite"})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 1)
+        self.assertIn(self.job_dev_part_onsite, jobs)
+        self.assertNotIn(self.job_dev_full_remote, jobs)
+
+    def test_inactive_category_excluded_from_filter_options(self):
+        response = self.client.get(reverse("job_list"))
+        categories = response.context["categories"]
+        self.assertIn(self.cat_dev, categories)
+        self.assertNotIn(self.cat_inactive, categories)
+
+    def test_combined_filters(self):
+        response = self.client.get(
+            reverse("job_list"),
+            {
+                "q": "Django",
+                "category": "development",
+                "location": "ktm",
+                "employment_type": Job.EmploymentType.FULL_TIME,
+                "remote": "remote",
+            },
+        )
+        jobs = list(response.context["jobs"])
+        self.assertEqual(len(jobs), 1)
+        self.assertIn(self.job_dev_full_remote, jobs)
+
+
+class PublicJobSortingTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="sort_emp", email="sort_emp@example.com")
+        self.category = make_category(name="Sort Cat", slug="sort-cat")
+        self.location = make_location(name="Sort Loc", slug="sort-loc")
+        today = timezone.localdate()
+
+        self.job_early_deadline = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Early Deadline Job",
+            description="Desc",
+            application_deadline=today + timedelta(days=2),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.job_late_deadline = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Late Deadline Job",
+            description="Desc",
+            application_deadline=today + timedelta(days=30),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_default_sort_is_newest(self):
+        response = self.client.get(reverse("job_list"))
+        jobs = list(response.context["jobs"])
+        self.assertEqual(jobs[0], self.job_late_deadline)
+        self.assertEqual(jobs[1], self.job_early_deadline)
+
+    def test_deadline_sort(self):
+        response = self.client.get(reverse("job_list"), {"sort": "deadline"})
+        jobs = list(response.context["jobs"])
+        self.assertEqual(jobs[0], self.job_early_deadline)
+        self.assertEqual(jobs[1], self.job_late_deadline)
+
+
+class PublicJobPaginationTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="page_emp", email="page_emp@example.com")
+        self.category = make_category(name="Page Cat", slug="page-cat")
+        self.location = make_location(name="Page Loc", slug="page-loc")
+        today = timezone.localdate()
+
+        self.created_jobs = []
+        for i in range(15):
+            job = Job.objects.create(
+                employer=self.employer,
+                category=self.category,
+                location=self.location,
+                title=f"Paginated Job {i + 1:02d}",
+                description=f"Description for job {i + 1}",
+                application_deadline=today + timedelta(days=10),
+                status=Job.Status.PUBLISHED,
+                published_at=timezone.now(),
+            )
+            self.created_jobs.append(job)
+
+    def test_first_page_contains_ten_jobs(self):
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["jobs"]), 10)
+        self.assertEqual(response.context["total_count"], 15)
+        self.assertTrue(response.context["page_obj"].has_next())
+
+    def test_second_page_contains_remaining_five_jobs(self):
+        response = self.client.get(reverse("job_list"), {"page": 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["jobs"]), 5)
+        self.assertTrue(response.context["page_obj"].has_previous())
+
+    def test_query_params_preserved_in_pagination(self):
+        response = self.client.get(reverse("job_list"), {"category": "page-cat", "page": 1})
+        self.assertEqual(response.status_code, 200)
+        query_string = response.context["query_string"]
+        self.assertIn("category=page-cat", query_string)
+        self.assertNotIn("page=", query_string)
+        content = response.content.decode()
+        self.assertIn("category=page-cat&page=2", content)
+
+
+class PublicJobUITests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="ui_pub_emp", email="ui_pub_emp@example.com")
+        self.employer.industry = "FinTech"
+        self.employer.address = "Tinkune, Kathmandu"
+        self.employer.website = "https://techcorp.example.com"
+        self.employer.save()
+
+        self.category = make_category(name="Finance UI", slug="finance-ui")
+        self.location = make_location(name="Kathmandu UI", slug="kathmandu-ui")
+        self.skill = Skill.objects.create(name="Accounting")
+
+        today = timezone.localdate()
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Senior Financial Analyst",
+            description="Manage corporate finance portfolios.",
+            responsibilities="Prepare financial statements and audits.",
+            experience_years_min=3,
+            education_level=Education.Level.BACHELOR,
+            vacancies=2,
+            salary_min=50000,
+            salary_max=80000,
+            is_remote=True,
+            application_deadline=today + timedelta(days=12),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.job.required_skills.add(self.skill)
+
+    def test_job_card_renders_core_public_information(self):
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Senior Financial Analyst", content)
+        self.assertIn(self.employer.company_name, content)
+        self.assertIn("Kathmandu UI", content)
+        self.assertIn("Remote", content)
+        self.assertIn("Finance UI", content)
+        self.assertIn("Full-time", content)
+        self.assertIn("Rs. 50,000 – Rs. 80,000", content)
+        self.assertIn(reverse("job_detail", args=[self.job.pk]), content)
+
+    def test_salary_formatting_variations(self):
+        # Range
+        self.assertEqual(self.job.salary_display, "Rs. 50,000 – Rs. 80,000")
+
+        # Min only
+        self.job.salary_max = None
+        self.assertEqual(self.job.salary_display, "Rs. 50,000+")
+
+        # Max only
+        self.job.salary_min = None
+        self.job.salary_max = 60000
+        self.assertEqual(self.job.salary_display, "Up to Rs. 60,000")
+
+        # Negotiable only
+        self.job.salary_min = None
+        self.job.salary_max = None
+        self.job.is_salary_negotiable = True
+        self.assertEqual(self.job.salary_display, "Negotiable")
+
+        # Not specified
+        self.job.is_salary_negotiable = False
+        self.assertEqual(self.job.salary_display, "Not specified")
+
+        # Min/max + Negotiable
+        self.job.salary_min = 40000
+        self.job.salary_max = 70000
+        self.job.is_salary_negotiable = True
+        self.assertEqual(self.job.salary_display, "Rs. 40,000 – Rs. 70,000 (Negotiable)")
+
+    def test_detail_page_renders_complete_information_and_application_notice(self):
+        response = self.client.get(reverse("job_detail", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+
+        self.assertIn("Senior Financial Analyst", content)
+        self.assertIn("Manage corporate finance portfolios.", content)
+        self.assertIn("Prepare financial statements and audits.", content)
+        self.assertIn("3 Years", content)
+        self.assertIn("Bachelor&#x27;s", content)
+        self.assertIn("accounting", content)
+        self.assertIn("2 Positions", content)
+        self.assertIn("Rs. 50,000 – Rs. 80,000", content)
+
+        # Public employer details
+        self.assertIn("FinTech", content)
+        self.assertIn("Tinkune, Kathmandu", content)
+        self.assertIn("https://techcorp.example.com", content)
+
+        # Application call to action (anonymous sees Login to Apply)
+        self.assertIn("Login to Apply", content)
+
+    def test_empty_state_when_filters_yield_no_results(self):
+        response = self.client.get(reverse("job_list"), {"q": "NonExistentTerm"})
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("No Matching Jobs Found", content)
+        self.assertIn("Clear All Filters", content)
+        self.assertIn(reverse("job_list"), content)
+
+    def test_empty_state_when_no_jobs_exist(self):
+        Job.objects.all().delete()
+        response = self.client.get(reverse("job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("No Jobs Currently Available", content)

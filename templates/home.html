@@ -1,4 +1,27 @@
-{% extends 'base.html' %} {% block content %}
-<h1>Welcome to NepalJobs</h1>
-<p class="lead">Find jobs across Nepal.</p>
+{% extends 'base.html' %}
+
+{% block title %}NepalJobs - Discover Jobs in Nepal{% endblock %}
+
+{% block content %}
+<div class="p-5 mb-4 bg-white rounded-3 shadow-sm text-center">
+  <div class="container-fluid py-4">
+    <h1 class="display-5 fw-bold text-dark mb-3">Find Your Next Dream Career in Nepal</h1>
+    <p class="col-md-8 fs-5 text-muted mx-auto mb-4">
+      Explore thousands of verified job vacancies across Kathmandu, Pokhara, Lalitpur, and throughout Nepal.
+    </p>
+
+    <form method="get" action="{% url 'job_list' %}" class="row justify-content-center g-2 mb-4" style="max-width: 640px; margin: 0 auto;">
+      <div class="col-sm-8">
+        <input type="text" name="q" class="form-control form-control-lg" placeholder="Job title, skills, or company...">
+      </div>
+      <div class="col-sm-4">
+        <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold">Search Jobs</button>
+      </div>
+    </form>
+
+    <div class="d-flex justify-content-center gap-3">
+      <a href="{% url 'job_list' %}" class="btn btn-outline-primary btn-sm px-4">Browse All Jobs</a>
+    </div>
+  </div>
+</div>
 {% endblock %}

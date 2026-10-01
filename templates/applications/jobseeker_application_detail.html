@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+
+{% block title %}Application for {{ application.job.title }} - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'jobseeker_application_list' %}" class="text-decoration-none small text-muted">
+    &larr; Back to My Applications
+  </a>
+</div>
+
+{# Application Header Card #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body p-4 p-md-5">
+    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-3">
+      <div>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h1 class="h3 fw-bold mb-0">{{ application.job.title }}</h1>
+          {% if application.job.is_remote %}
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+              Remote
+            </span>
+          {% endif %}
+        </div>
+        <h2 class="h5 text-muted mb-3 fw-normal">
+          <a href="{% url 'company_detail' application.job.employer.pk %}" class="text-decoration-none text-secondary fw-semibold">
+            {{ application.job.employer.company_name }}
+          </a>
+        </h2>
+        <div class="d-flex flex-wrap align-items-center gap-2 text-muted small">
+          <span class="badge bg-light text-dark border">
+            &#128205; {{ application.job.location.name }}
+          </span>
+          <span class="badge bg-light text-dark border">
+            &#128188; {{ application.job.get_employment_type_display }}
+          </span>
+          <span class="badge bg-light text-dark border">
+            &#128197; Applied on: {{ application.created_at|date:"M d, Y" }}
+          </span>
+        </div>
+      </div>
+
+      <div class="text-sm-end">
+        <div class="text-muted small mb-1">Current Status</div>
+        <div>
+          {% if application.status == 'applied' %}
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle fs-6 px-3 py-2">Applied</span>
+          {% elif application.status == 'under_review' %}
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle fs-6 px-3 py-2">Under Review</span>
+          {% elif application.status == 'shortlisted' %}
+            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle fs-6 px-3 py-2">Shortlisted</span>
+          {% elif application.status == 'interview' %}
+            <span class="badge bg-primary text-white fs-6 px-3 py-2">Interview</span>
+          {% elif application.status == 'selected' %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle fs-6 px-3 py-2">Selected</span>
+          {% elif application.status == 'rejected' %}
+            <span class="badge bg-danger-subtle text-danger border border-danger-subtle fs-6 px-3 py-2">Rejected</span>
+          {% else %}
+            <span class="badge bg-secondary fs-6 px-3 py-2">{{ application.get_status_display }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    {# Submitted Materials #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h3 class="h5 fw-bold mb-3 border-bottom pb-2">Submitted Materials</h3>
+
+        <div class="mb-4">
+          <div class="fw-semibold text-dark mb-1">Submitted Resume / CV</div>
+          {% if application.cv %}
+            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border">
+              <div>
+                <div class="fw-semibold text-dark">&#128196; {{ application.cv.title }}</div>
+                <div class="text-muted small">{{ application.cv.original_filename }}</div>
+              </div>
+              <div>
+                <a href="{% url 'cv_download' application.cv.pk %}" class="btn btn-outline-primary btn-sm" target="_blank">
+                  Download CV
+                </a>
+              </div>
+            </div>
+          {% else %}
+            <p class="text-muted small mb-0">No active CV attached to this application.</p>
+          {% endif %}
+        </div>
+
+        <div class="mb-0">
+          <div class="fw-semibold text-dark mb-1">Cover Letter</div>
+          {% if application.cover_letter %}
+            <div class="p-3 bg-light rounded border text-secondary" style="line-height: 1.8;">
+              {{ application.cover_letter|linebreaksbr }}
+            </div>
+          {% else %}
+            <p class="text-muted small mb-0">No cover letter was submitted with this application.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {# Job Details Summary #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+          <h3 class="h5 fw-bold mb-0">Job Overview</h3>
+          {% if application.job.is_open %}
+            <a href="{% url 'job_detail' application.job.pk %}" class="small text-decoration-none">
+              View Public Posting &rarr;
+            </a>
+          {% endif %}
+        </div>
+
+        <div class="text-secondary mb-4" style="line-height: 1.8;">
+          {{ application.job.description|linebreaksbr }}
+        </div>
+
+        {% if application.job.responsibilities %}
+          <h4 class="h6 fw-bold mb-2">Key Responsibilities</h4>
+          <div class="text-secondary" style="line-height: 1.8;">
+            {{ application.job.responsibilities|linebreaksbr }}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    {# Application Status Timeline / Notice #}
+    <div class="card shadow-sm border-0 mb-4 bg-light">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-2">Application Timeline</h5>
+        <p class="text-muted small mb-3">
+          Submitted on <strong>{{ application.created_at|date:"M d, Y, h:i A" }}</strong>.
+        </p>
+        <div class="small text-muted border-top pt-2">
+          Application status updates and interview notifications are managed by the employer's recruitment team.
+        </div>
+      </div>
+    </div>
+
+    {# Employer Summary #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3 border-bottom pb-2">About the Employer</h5>
+        <div class="fw-semibold text-dark mb-1">{{ application.job.employer.company_name }}</div>
+        {% if application.job.employer.industry %}
+          <div class="text-muted small mb-2">{{ application.job.employer.industry }}</div>
+        {% endif %}
+        {% if application.job.employer.address %}
+          <div class="small text-muted mb-2">&#128205; {{ application.job.employer.address }}</div>
+        {% endif %}
+        <div class="pt-2 border-top">
+          <a href="{% url 'company_detail' application.job.employer.pk %}" class="btn btn-outline-secondary btn-sm w-100">
+            View Company Profile
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

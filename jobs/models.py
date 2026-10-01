@@ -172,6 +172,23 @@ class Job(models.Model):
             and self.employer.is_approved
         )
 
+    @property
+    def salary_display(self):
+        if self.salary_min and self.salary_max:
+            val = f"Rs. {self.salary_min:,} – Rs. {self.salary_max:,}"
+        elif self.salary_min:
+            val = f"Rs. {self.salary_min:,}+"
+        elif self.salary_max:
+            val = f"Up to Rs. {self.salary_max:,}"
+        elif self.is_salary_negotiable:
+            return "Negotiable"
+        else:
+            return "Not specified"
+
+        if self.is_salary_negotiable:
+            val += " (Negotiable)"
+        return val
+
     def publish(self):
         if not self.employer.is_approved:
             raise ValidationError("Only approved employers may publish jobs.")

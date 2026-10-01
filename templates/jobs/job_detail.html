@@ -1,0 +1,278 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ job.title }} at {{ job.employer.company_name }} - NepalJobs{% endblock %}
+
+{% block content %}
+{# Breadcrumbs / Back Navigation #}
+<div class="mb-3">
+  <a href="{% url 'job_list' %}" class="text-decoration-none small text-muted">
+    &larr; Back to Job Search
+  </a>
+</div>
+
+{# Job Header Card #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body p-4 p-md-5">
+    <div class="d-flex flex-column flex-sm-row align-items-start gap-4">
+      {# Company Logo #}
+      <div class="flex-shrink-0">
+        {% if job.employer.logo %}
+          <img src="{{ job.employer.logo.url }}" alt="{{ job.employer.company_name }} Logo" class="company-logo-hero">
+        {% else %}
+          <div class="company-logo-hero-placeholder">{{ job.employer.company_name|slice:":1"|upper }}</div>
+        {% endif %}
+      </div>
+
+      {# Title & Meta #}
+      <div class="flex-grow-1">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h1 class="h2 fw-bold mb-0">{{ job.title }}</h1>
+          {% if job.is_remote %}
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+              Remote
+            </span>
+          {% endif %}
+        </div>
+
+        <h2 class="h5 text-muted mb-3 fw-normal">
+          <a href="{% url 'company_detail' job.employer.pk %}" class="text-decoration-none text-secondary fw-semibold">
+            {{ job.employer.company_name }}
+          </a>
+        </h2>
+
+        <div class="d-flex flex-wrap align-items-center gap-2 text-muted small">
+          <span class="badge bg-light text-dark border">
+            &#128205; {{ job.location.name }}
+          </span>
+          <span class="badge bg-light text-dark border">
+            &#128188; {{ job.get_employment_type_display }}
+          </span>
+          <span class="badge bg-light text-dark border">
+            &#128193; {{ job.category.name }}
+          </span>
+          <span class="badge bg-light text-dark border">
+            &#128197; Deadline: {{ job.application_deadline|date:"M d, Y" }}
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  {# Main Content Column #}
+  <div class="col-lg-8">
+    {# Job Description #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h3 class="h5 fw-bold mb-3 border-bottom pb-2">Job Description</h3>
+        <div class="text-secondary" style="line-height: 1.8;">
+          {{ job.description|linebreaksbr }}
+        </div>
+      </div>
+    </div>
+
+    {# Responsibilities (if present) #}
+    {% if job.responsibilities %}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <h3 class="h5 fw-bold mb-3 border-bottom pb-2">Key Responsibilities</h3>
+          <div class="text-secondary" style="line-height: 1.8;">
+            {{ job.responsibilities|linebreaksbr }}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {# Requirements & Skills #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h3 class="h5 fw-bold mb-3 border-bottom pb-2">Requirements & Qualifications</h3>
+
+        <div class="row g-3 mb-4">
+          <div class="col-sm-6">
+            <div class="info-label">Minimum Experience</div>
+            <div class="fw-semibold text-dark">
+              {% if job.experience_years_min %}
+                {{ job.experience_years_min }} Year{{ job.experience_years_min|pluralize }}
+              {% else %}
+                <span class="text-muted fw-normal">Fresher / No experience specified</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="info-label">Education Level</div>
+            <div class="fw-semibold text-dark">
+              {% if job.education_level %}
+                {{ job.get_education_level_display }}
+              {% else %}
+                <span class="text-muted fw-normal">Not specified</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <h4 class="h6 fw-bold mb-2">Required Skills</h4>
+        {% if job.required_skills.all %}
+          <div class="d-flex flex-wrap gap-2">
+            {% for skill in job.required_skills.all %}
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 fs-6">
+                {{ skill.name }}
+              </span>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-muted small mb-0">No specific required skills listed.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Sidebar Column #}
+  <div class="col-lg-4">
+    {# Application Action Card #}
+    <div class="card shadow-sm border-0 mb-4 bg-light">
+      <div class="card-body p-4 text-center">
+        <h5 class="fw-bold mb-2">Ready to Apply?</h5>
+
+        {% if not job.is_open %}
+          <div class="alert alert-secondary small mb-0 text-start">
+            This position is currently closed or has expired. Applications are no longer being accepted.
+          </div>
+        {% elif not user.is_authenticated %}
+          <p class="text-muted small mb-3">
+            Please log in with your jobseeker account to apply for this position.
+          </p>
+          <a href="{% url 'login' %}?next={% url 'apply_job' job.pk %}" class="btn btn-primary w-100">
+            Login to Apply
+          </a>
+        {% elif user.is_employer %}
+          <div class="alert alert-info small mb-0 text-start">
+            Employers cannot apply to jobs. Please sign in with a jobseeker account to submit an application.
+          </div>
+        {% elif user.is_jobseeker %}
+          {% if user_application %}
+            <div class="badge bg-success-subtle text-success border border-success-subtle fs-6 px-3 py-2 mb-2">
+              Already Applied
+            </div>
+            <p class="text-muted small mb-3">
+              You applied for this position on {{ user_application.created_at|date:"M d, Y" }}.
+            </p>
+            <a href="{% url 'jobseeker_application_detail' user_application.pk %}" class="btn btn-outline-primary w-100">
+              View Your Application
+            </a>
+          {% elif not has_active_cv %}
+            <div class="alert alert-warning small mb-3 text-start">
+              <strong>CV Required:</strong> You need an active CV uploaded before you can apply for this job.
+            </div>
+            <a href="{% url 'cv_list' %}" class="btn btn-primary w-100">
+              Upload / Manage CV
+            </a>
+          {% else %}
+            <p class="text-muted small mb-3">
+              Submit your application using your uploaded CV.
+            </p>
+            <a href="{% url 'apply_job' job.pk %}" class="btn btn-primary w-100">
+              Apply Now
+            </a>
+          {% endif %}
+        {% else %}
+          <p class="text-muted small mb-0">
+            Staff and administrative accounts cannot submit job applications.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Position Overview #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Position Overview</h4>
+
+        <div class="info-label">Offered Salary</div>
+        <div class="info-value fw-semibold text-success fs-6">
+          {{ job.salary_display }}
+        </div>
+
+        <div class="info-label">Application Deadline</div>
+        <div class="info-value">
+          {{ job.application_deadline|date:"M d, Y" }}
+        </div>
+
+        <div class="info-label">Job Category</div>
+        <div class="info-value">
+          {{ job.category.name }}
+        </div>
+
+        <div class="info-label">Workplace & Location</div>
+        <div class="info-value">
+          {{ job.location.name }}
+          {% if job.is_remote %}
+            <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+          {% endif %}
+        </div>
+
+        <div class="info-label">Employment Type</div>
+        <div class="info-value">
+          {{ job.get_employment_type_display }}
+        </div>
+
+        <div class="info-label">Number of Vacancies</div>
+        <div class="info-value">
+          {{ job.vacancies }} Position{{ job.vacancies|pluralize }}
+        </div>
+
+        <div class="info-label">Posted Date</div>
+        <div class="info-value mb-0">
+          {{ job.published_at|date:"M d, Y"|default:job.created_at|date:"M d, Y" }}
+        </div>
+      </div>
+    </div>
+
+    {# Employer Info Card #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">About the Company</h4>
+
+        <div class="d-flex align-items-center gap-3 mb-3">
+          {% if job.employer.logo %}
+            <img src="{{ job.employer.logo.url }}" alt="{{ job.employer.company_name }} Logo" class="company-logo-lg">
+          {% else %}
+            <div class="company-logo-placeholder">{{ job.employer.company_name|slice:":1"|upper }}</div>
+          {% endif %}
+          <div>
+            <h5 class="h6 fw-bold mb-1">
+              <a href="{% url 'company_detail' job.employer.pk %}" class="text-decoration-none text-dark">
+                {{ job.employer.company_name }}
+              </a>
+            </h5>
+            {% if job.employer.industry %}
+              <div class="text-muted small">{{ job.employer.industry }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if job.employer.address %}
+          <div class="info-label">Headquarters / Location</div>
+          <div class="info-value small">{{ job.employer.address }}</div>
+        {% endif %}
+
+        {% if job.employer.website %}
+          <div class="info-label">Website</div>
+          <div class="info-value small">
+            <a href="{{ job.employer.website }}" target="_blank" rel="noopener noreferrer" class="text-break">
+              {{ job.employer.website }}
+            </a>
+          </div>
+        {% endif %}
+
+        <div class="pt-2 border-top">
+          <a href="{% url 'company_detail' job.employer.pk %}" class="btn btn-outline-secondary btn-sm w-100">
+            View Company Profile
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
