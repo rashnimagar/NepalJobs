@@ -1,0 +1,383 @@
+{% extends 'base.html' %}
+
+{% block title %}Application Review - {{ application.jobseeker.user.get_full_name|default:application.jobseeker.user.username }} - NepalJobs{% endblock %}
+
+{% block content %}
+{# Breadcrumbs #}
+<div class="mb-3">
+  <a href="{% url 'employer_job_applicants' application.job.pk %}" class="text-decoration-none small text-muted">
+    &larr; Back to Applicants for {{ application.job.title }}
+  </a>
+</div>
+
+{# Header Card #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body p-4 p-md-5">
+    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-3">
+      <div>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h1 class="h3 fw-bold mb-0">
+            {{ application.jobseeker.user.get_full_name|default:application.jobseeker.user.username }}
+          </h1>
+          {% if application.jobseeker.location %}
+            <span class="badge bg-light text-dark border">
+              &#128205; {{ application.jobseeker.location }}
+            </span>
+          {% endif %}
+        </div>
+        <h2 class="h5 text-muted mb-3 fw-normal">
+          Applied for: <span class="fw-semibold text-secondary">{{ application.job.title }}</span>
+        </h2>
+        <div class="d-flex flex-wrap align-items-center gap-3 text-muted small">
+          <span>&#9993; {{ application.jobseeker.user.email }}</span>
+          {% if application.jobseeker.phone %}
+            <span>&#9742; {{ application.jobseeker.phone }}</span>
+          {% endif %}
+          <span>&#128197; Applied: {{ application.created_at|date:"M d, Y, h:i A" }}</span>
+        </div>
+      </div>
+
+      <div class="text-sm-end">
+        <div class="text-muted small mb-1">Current Status</div>
+        <div>
+          {% if application.status == 'applied' %}
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle fs-6 px-3 py-2">Applied</span>
+          {% elif application.status == 'under_review' %}
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle fs-6 px-3 py-2">Under Review</span>
+          {% elif application.status == 'shortlisted' %}
+            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle fs-6 px-3 py-2">Shortlisted</span>
+          {% elif application.status == 'interview' %}
+            <span class="badge bg-primary text-white fs-6 px-3 py-2">Interview</span>
+          {% elif application.status == 'selected' %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle fs-6 px-3 py-2">Selected</span>
+          {% elif application.status == 'rejected' %}
+            <span class="badge bg-danger-subtle text-danger border border-danger-subtle fs-6 px-3 py-2">Rejected</span>
+          {% else %}
+            <span class="badge bg-secondary fs-6 px-3 py-2">{{ application.get_status_display }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  {# Main Column: Candidate Details & Application Materials #}
+  <div class="col-lg-8">
+    {# Summary / Bio #}
+    {% if application.jobseeker.summary %}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Professional Summary</h4>
+          <div class="text-secondary" style="line-height: 1.8;">
+            {{ application.jobseeker.summary|linebreaksbr }}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {# Submitted Materials: CV & Cover Letter #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Application Documents</h4>
+
+        {# Submitted CV #}
+        <div class="mb-4">
+          <div class="fw-semibold text-dark mb-2">Submitted Resume / CV</div>
+          {% if application.cv %}
+            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border">
+              <div>
+                <div class="fw-semibold text-dark">&#128196; {{ application.cv.title }}</div>
+                <div class="text-muted small">{{ application.cv.original_filename }} &bull; Uploaded {{ application.cv.uploaded_at|date:"M d, Y" }}</div>
+              </div>
+              <div>
+                <a href="{% url 'cv_download' application.cv.pk %}" class="btn btn-outline-primary btn-sm" target="_blank">
+                  Download CV
+                </a>
+              </div>
+            </div>
+          {% else %}
+            <p class="text-muted small mb-0">No CV attached to this application.</p>
+          {% endif %}
+        </div>
+
+        {# Cover Letter #}
+        <div class="mb-0">
+          <div class="fw-semibold text-dark mb-2">Cover Letter</div>
+          {% if application.cover_letter %}
+            <div class="p-3 bg-light rounded border text-secondary" style="line-height: 1.8;">
+              {{ application.cover_letter|linebreaksbr }}
+            </div>
+          {% else %}
+            <p class="text-muted small mb-0">No cover letter was included by the candidate.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {# Candidate Skills #}
+    {% if application.jobseeker.skills.all %}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Skills</h4>
+          <div class="d-flex flex-wrap gap-2">
+            {% for skill in application.jobseeker.skills.all %}
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 fs-6">
+                {{ skill.name }}
+              </span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {# Work Experience #}
+    {% if application.jobseeker.experiences.all %}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Work Experience</h4>
+          <div class="d-flex flex-column gap-3">
+            {% for exp in application.jobseeker.experiences.all %}
+              <div class="border-start border-3 border-primary ps-3 py-1">
+                <div class="fw-bold text-dark">{{ exp.job_title }}</div>
+                <div class="text-muted small">{{ exp.company_name }} &bull; {{ exp.start_date|date:"M Y" }} – {% if exp.is_current %}Present{% else %}{{ exp.end_date|date:"M Y"|default:"N/A" }}{% endif %}</div>
+                {% if exp.description %}
+                  <div class="text-secondary small mt-1" style="line-height: 1.6;">
+                    {{ exp.description|linebreaksbr }}
+                  </div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {# Education #}
+    {% if application.jobseeker.educations.all %}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Education</h4>
+          <div class="d-flex flex-column gap-3">
+            {% for edu in application.jobseeker.educations.all %}
+              <div class="border-start border-3 border-info ps-3 py-1">
+                <div class="fw-bold text-dark">{{ edu.degree }} in {{ edu.field_of_study }}</div>
+                <div class="text-muted small">{{ edu.institution }} &bull; {{ edu.get_level_display }} &bull; Graduated {{ edu.graduation_year }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  {# Right Sidebar: Interview Management, Status Management & History #}
+  <div class="col-lg-4">
+    {# Interview Management Card #}
+    <div class="card shadow-sm border-0 mb-4 border-start border-4 {% if active_interview %}border-primary{% else %}border-secondary{% endif %}">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+          <h4 class="h5 fw-bold mb-0">Interview</h4>
+          {% if active_interview %}
+            <span class="badge bg-primary">Scheduled</span>
+          {% else %}
+            <span class="badge bg-light text-muted border">None Active</span>
+          {% endif %}
+        </div>
+
+        {% if active_interview %}
+          <div class="mb-3">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+                {{ active_interview.get_interview_type_display }}
+              </span>
+              <span class="badge bg-light text-dark border">
+                {{ active_interview.duration_minutes }} mins
+              </span>
+            </div>
+            <div class="fw-bold text-dark fs-6 mt-2">
+              &#128197; {{ active_interview.scheduled_at|date:"l, M d, Y" }}
+            </div>
+            <div class="text-muted small">
+              &#128337; {{ active_interview.scheduled_at|date:"h:i A" }}
+            </div>
+            <div class="small mt-2">
+              <strong>Location / Link:</strong><br>
+              {% if "http://" in active_interview.location_or_link or "https://" in active_interview.location_or_link %}
+                <a href="{{ active_interview.location_or_link }}" target="_blank" rel="noopener noreferrer" class="text-break">
+                  {{ active_interview.location_or_link }}
+                </a>
+              {% else %}
+                <span class="text-secondary">{{ active_interview.location_or_link }}</span>
+              {% endif %}
+            </div>
+
+            {% if active_interview.candidate_instructions %}
+              <div class="mt-2 p-2 bg-light rounded border small">
+                <div class="text-muted fw-semibold" style="font-size: 0.75rem;">Instructions for Candidate:</div>
+                <div class="text-secondary">{{ active_interview.candidate_instructions|linebreaksbr }}</div>
+              </div>
+            {% endif %}
+
+            {% if active_interview.internal_notes %}
+              <div class="mt-2 p-2 bg-warning-subtle rounded border border-warning-subtle small">
+                <div class="text-warning-emphasis fw-semibold" style="font-size: 0.75rem;">Internal Notes (Private to Employer):</div>
+                <div class="text-secondary fst-italic">{{ active_interview.internal_notes|linebreaksbr }}</div>
+              </div>
+            {% endif %}
+
+            <div class="d-flex gap-2 mt-3 pt-2 border-top">
+              <a href="{% url 'employer_edit_interview' active_interview.pk %}" class="btn btn-outline-primary btn-sm flex-grow-1">
+                Reschedule / Edit
+              </a>
+              <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#cancelInterviewModal">
+                Cancel
+              </button>
+            </div>
+          </div>
+
+          {# Cancel Confirmation Modal #}
+          <div class="modal fade" id="cancelInterviewModal" tabindex="-1" aria-labelledby="cancelInterviewModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="cancelInterviewModalLabel">Cancel Interview</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-secondary small">
+                  Are you sure you want to cancel the scheduled interview on
+                  <strong>{{ active_interview.scheduled_at|date:"M d, Y at h:i A" }}</strong>?
+                  The application will remain in the <strong>Interview</strong> stage, and the cancellation will be recorded in history.
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                  <form method="post" action="{% url 'employer_cancel_interview' active_interview.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger btn-sm">Yes, Cancel Interview</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% else %}
+          <div class="py-2">
+            {% if can_schedule_interview %}
+              <p class="text-muted small mb-3">
+                Candidate is eligible for interview scheduling.
+              </p>
+              <a href="{% url 'employer_schedule_interview' application.pk %}" class="btn btn-success btn-sm w-100">
+                &#128197; Schedule Interview
+              </a>
+            {% else %}
+              <p class="text-muted small mb-0">
+                {% if application.is_terminal %}
+                  Interviews cannot be scheduled for terminal applications.
+                {% elif application.status in 'applied,under_review' %}
+                  Candidate must be moved to <strong>Shortlisted</strong> or <strong>Interview</strong> stage before an interview can be scheduled.
+                {% else %}
+                  No active interview scheduled.
+                {% endif %}
+              </p>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {# Historical Interviews #}
+        {% if historical_interviews %}
+          <div class="mt-3 pt-3 border-top">
+            <div class="text-muted small fw-semibold mb-2">Past / Cancelled ({{ historical_interviews.count }})</div>
+            <div class="d-flex flex-column gap-2">
+              {% for h_int in historical_interviews %}
+                <div class="p-2 bg-light rounded border small">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="badge {% if h_int.status == 'cancelled' %}bg-danger-subtle text-danger border border-danger-subtle{% else %}bg-secondary{% endif %}" style="font-size: 0.7rem;">
+                      {{ h_int.get_status_display }}
+                    </span>
+                    <span class="text-muted" style="font-size: 0.75rem;">
+                      {{ h_int.scheduled_at|date:"M d, Y" }}
+                    </span>
+                  </div>
+                  <div class="text-dark small">{{ h_int.get_interview_type_display }} &bull; {{ h_int.duration_minutes }}m</div>
+                  {% if h_int.internal_notes %}
+                    <div class="text-muted small fst-italic mt-1" style="font-size: 0.75rem;">
+                      "{{ h_int.internal_notes|truncatechars:60 }}"
+                    </div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Status Management Card #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Status Management</h4>
+
+        <div class="mb-3">
+          <div class="text-muted small mb-1">Current Application Stage</div>
+          <div class="fw-semibold">
+            {{ application.get_status_display }}
+          </div>
+        </div>
+
+        {% if can_change_status %}
+          <form method="post" action="{% url 'employer_application_detail' application.pk %}">
+            {% csrf_token %}
+            {% include 'includes/form_fields.html' %}
+
+            <div class="d-grid mt-4">
+              <button type="submit" class="btn btn-primary fw-semibold">
+                Update Status
+              </button>
+            </div>
+          </form>
+        {% else %}
+          <div class="alert alert-secondary small mb-0">
+            <strong>Terminal Stage:</strong> This application is marked as
+            <strong>{{ application.get_status_display }}</strong> and can no longer be transitioned.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Internal Recruitment History (Employer Only) #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <h4 class="h5 fw-bold mb-3 border-bottom pb-2">Recruitment History</h4>
+
+        {% if history %}
+          <div class="timeline">
+            {% for record in history %}
+              <div class="mb-3 pb-3 border-bottom">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="badge bg-secondary-subtle text-secondary border small">
+                    {{ record.get_old_status_display }} &rarr; {{ record.get_new_status_display }}
+                  </span>
+                  <span class="text-muted small">{{ record.created_at|date:"M d, H:i" }}</span>
+                </div>
+                {% if record.changed_by %}
+                  <div class="text-muted small mb-1">
+                    By: {{ record.changed_by.get_full_name|default:record.changed_by.username }}
+                  </div>
+                {% endif %}
+                {% if record.notes %}
+                  <div class="p-2 bg-light rounded text-secondary small fst-italic">
+                    "{{ record.notes }}"
+                  </div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-muted small mb-0">
+            No status changes have been recorded yet. The application was received on {{ application.created_at|date:"M d, Y" }}.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

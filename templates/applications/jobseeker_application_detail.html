@@ -35,7 +35,10 @@
             &#128188; {{ application.job.get_employment_type_display }}
           </span>
           <span class="badge bg-light text-dark border">
-            &#128197; Applied on: {{ application.created_at|date:"M d, Y" }}
+            &#128197; Applied: {{ application.created_at|date:"M d, Y" }}
+          </span>
+          <span class="badge bg-light text-dark border">
+            &#128337; Last updated: {{ application.updated_at|date:"M d, Y" }}
           </span>
         </div>
       </div>
@@ -64,8 +67,146 @@
   </div>
 </div>
 
+{# Recruitment Progress Stepper Card #}
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body p-4">
+    <h4 class="h6 fw-bold mb-3 text-uppercase text-muted">Recruitment Progress</h4>
+
+    {% if is_rejected %}
+      <div class="alert alert-danger mb-0 d-flex align-items-center gap-3">
+        <span class="fs-4">&#10060;</span>
+        <div>
+          <div class="fw-bold">Application Status: Not Selected</div>
+          <div class="small">
+            Thank you for your interest in this role. After review, the hiring team has decided to proceed with other candidates.
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center position-relative py-2 gap-3">
+        {% for stage in pipeline_stages %}
+          <div class="d-flex align-items-center gap-2 flex-grow-1">
+            {# Stage Badge / Icon #}
+            {% if stage.step < current_step %}
+              <div class="rounded-circle bg-success text-white d-flex align-items-center justify-content-center fw-bold" style="width: 34px; height: 34px; min-width: 34px;">
+                &#10003;
+              </div>
+            {% elif stage.step == current_step %}
+              <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center fw-bold shadow-sm" style="width: 34px; height: 34px; min-width: 34px;">
+                {{ stage.step }}
+              </div>
+            {% else %}
+              <div class="rounded-circle bg-light border text-muted d-flex align-items-center justify-content-center fw-semibold" style="width: 34px; height: 34px; min-width: 34px;">
+                {{ stage.step }}
+              </div>
+            {% endif %}
+
+            {# Stage Label #}
+            <div>
+              <div class="small {% if stage.step == current_step %}fw-bold text-primary{% elif stage.step < current_step %}fw-semibold text-dark{% else %}text-muted{% endif %}">
+                {{ stage.label }}
+              </div>
+              {% if stage.step == current_step %}
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle" style="font-size: 0.7rem;">Current</span>
+              {% elif stage.step < current_step %}
+                <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 0.7rem;">Completed</span>
+              {% endif %}
+            </div>
+
+            {% if not forloop.last %}
+              <div class="d-none d-md-block flex-grow-1 border-top mx-2 {% if stage.step < current_step %}border-success border-2{% else %}border-secondary-subtle{% endif %}"></div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{# What Happens Next Guidance Card #}
+<div class="card shadow-sm border-0 mb-4 border-start border-4 {% if is_rejected %}border-danger{% else %}border-primary{% endif %}">
+  <div class="card-body p-4">
+    <div class="d-flex align-items-start gap-3">
+      <div class="fs-4 {% if is_rejected %}text-danger{% else %}text-primary{% endif %}">&#8505;&#65039;</div>
+      <div>
+        <h5 class="h6 fw-bold mb-1">What Happens Next</h5>
+        <p class="text-secondary mb-0 small" style="line-height: 1.6;">
+          {{ next_steps_guidance }}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="row g-4">
   <div class="col-lg-8">
+    {# Upcoming Interview Card #}
+    {% if candidate_active_interview %}
+      <div class="card shadow-sm border-0 mb-4 border-start border-4 border-primary">
+        <div class="card-body p-4">
+          <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-2 mb-3 border-bottom pb-2">
+            <div>
+              <h4 class="h5 fw-bold mb-1 text-primary">
+                &#128197; Upcoming Interview
+              </h4>
+              <div class="text-muted small">
+                Please review your scheduled interview details below.
+              </div>
+            </div>
+            <div>
+              <span class="badge bg-primary px-3 py-2 fs-6">Scheduled</span>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <div class="text-muted small">Date &amp; Time</div>
+              <div class="fw-bold text-dark fs-6">
+                {{ candidate_active_interview.scheduled_at|date:"l, F d, Y" }}
+              </div>
+              <div class="text-secondary small">
+                &#128337; {{ candidate_active_interview.scheduled_at|date:"h:i A" }} ({{ candidate_active_interview.duration_minutes }} minutes)
+              </div>
+            </div>
+
+            <div class="col-sm-6">
+              <div class="text-muted small">Interview Format</div>
+              <div class="fw-semibold text-dark mt-1">
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+                  {{ candidate_active_interview.interview_type_display }}
+                </span>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <div class="text-muted small">Location / Meeting Link / Phone</div>
+              <div class="mt-1">
+                {% if "http://" in candidate_active_interview.location_or_link or "https://" in candidate_active_interview.location_or_link %}
+                  <a href="{{ candidate_active_interview.location_or_link }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">
+                    &#128279; Join Meeting Link
+                  </a>
+                  <div class="small text-muted mt-1 text-break">{{ candidate_active_interview.location_or_link }}</div>
+                {% else %}
+                  <div class="p-2 bg-light rounded border text-dark fw-medium small">
+                    &#128205; {{ candidate_active_interview.location_or_link }}
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          {% if candidate_active_interview.candidate_instructions %}
+            <div class="p-3 bg-light rounded border">
+              <div class="fw-semibold text-dark small mb-1">&#128221; Instructions for You:</div>
+              <div class="text-secondary small" style="line-height: 1.6;">
+                {{ candidate_active_interview.candidate_instructions|linebreaksbr }}
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
     {# Submitted Materials #}
     <div class="card shadow-sm border-0 mb-4">
       <div class="card-body p-4">
@@ -130,18 +271,59 @@
   </div>
 
   <div class="col-lg-4">
-    {# Application Status Timeline / Notice #}
-    <div class="card shadow-sm border-0 mb-4 bg-light">
+    {# Candidate-Safe Status Timeline #}
+    <div class="card shadow-sm border-0 mb-4">
       <div class="card-body p-4">
-        <h5 class="fw-bold mb-2">Application Timeline</h5>
-        <p class="text-muted small mb-3">
-          Submitted on <strong>{{ application.created_at|date:"M d, Y, h:i A" }}</strong>.
-        </p>
-        <div class="small text-muted border-top pt-2">
-          Application status updates and interview notifications are managed by the employer's recruitment team.
+        <h5 class="fw-bold mb-3 border-bottom pb-2">Status Timeline</h5>
+        <ul class="list-unstyled mb-0">
+          {% for event in timeline_events %}
+            <li class="d-flex align-items-start gap-3 mb-3 {% if forloop.last %}mb-0{% endif %}">
+              <div class="rounded-circle {% if forloop.last %}bg-primary text-white{% else %}bg-light text-muted border{% endif %} d-flex align-items-center justify-content-center fw-bold mt-1" style="width: 22px; height: 22px; min-width: 22px; font-size: 0.75rem;">
+                &#8226;
+              </div>
+              <div class="flex-grow-1">
+                <div class="fw-semibold small text-dark">{{ event.status_display }}</div>
+                <div class="text-muted" style="font-size: 0.75rem;">
+                  {{ event.timestamp|date:"M d, Y, h:i A" }}
+                </div>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+        <div class="small text-muted border-top pt-3 mt-3">
+          <div><strong>Last updated:</strong> {{ application.updated_at|date:"M d, Y, h:i A" }}</div>
         </div>
       </div>
     </div>
+
+    {# Candidate Interview History #}
+    {% if candidate_historical_interviews %}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <h5 class="fw-bold mb-3 border-bottom pb-2">Interview History</h5>
+          <div class="d-flex flex-column gap-2">
+            {% for h_int in candidate_historical_interviews %}
+              <div class="p-2 bg-light rounded border small">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="badge {% if h_int.status == 'cancelled' %}bg-danger-subtle text-danger border border-danger-subtle{% else %}bg-secondary{% endif %}" style="font-size: 0.7rem;">
+                    {{ h_int.status_display }}
+                  </span>
+                  <span class="text-muted" style="font-size: 0.75rem;">
+                    {{ h_int.scheduled_at|date:"M d, Y" }}
+                  </span>
+                </div>
+                <div class="text-dark small">{{ h_int.interview_type_display }} &bull; {{ h_int.duration_minutes }}m</div>
+                {% if h_int.candidate_instructions %}
+                  <div class="text-secondary small mt-1">
+                    {{ h_int.candidate_instructions|truncatechars:60 }}
+                  </div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
 
     {# Employer Summary #}
     <div class="card shadow-sm border-0 mb-4">

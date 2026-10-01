@@ -25,6 +25,8 @@ from .forms import (
     SkillsForm,
 )
 from .models import CV, MAX_ACTIVE_CVS, Education, EmployerProfile, Experience, Skill
+from django.db.models import Count, Q
+from applications.models import Application
 
 
 def register_choice(request):
@@ -76,11 +78,32 @@ def jobseeker_dashboard(request):
         ("Upload a CV", profile.cvs.filter(is_active=True).exists(), "cv_list"),
     ]
     done = sum(1 for _, ok, _ in steps if ok)
+
+    # Application metrics scoped strictly to authenticated jobseeker
+    app_metrics = profile.applications.aggregate(
+        total=Count("id"),
+        under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
+        interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
+        selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
+    )
+
+    # 3-5 most recent applications
+    recent_applications = (
+        profile.applications.select_related("job", "job__employer", "job__location")
+        .order_by("-created_at")[:5]
+    )
+
     return render(request, "accounts/jobseeker_dashboard.html", {
         "steps": steps,
         "done": done,
         "total": len(steps),
         "percent": int(done * 100 / len(steps)),
+        "app_metrics": app_metrics,
+        "total_applications": app_metrics["total"],
+        "under_review_count": app_metrics["under_review"],
+        "interview_count": app_metrics["interview"],
+        "selected_count": app_metrics["selected"],
+        "recent_applications": recent_applications,
     })
 
 

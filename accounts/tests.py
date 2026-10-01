@@ -913,6 +913,62 @@ class DashboardTests(TestCase):
         # 1 out of 5 = 20%
         self.assertEqual(response.context["percent"], 20)
 
+    def test_dashboard_empty_application_state(self):
+        response = self._get_dashboard()
+        self.assertEqual(response.context["total_applications"], 0)
+        self.assertEqual(response.context["under_review_count"], 0)
+        self.assertEqual(response.context["interview_count"], 0)
+        self.assertEqual(response.context["selected_count"], 0)
+        self.assertEqual(list(response.context["recent_applications"]), [])
+        self.assertIn("haven't submitted any job applications yet", response.content.decode())
+
+    def test_dashboard_application_metric_context_and_recent_applications(self):
+        import datetime
+        from applications.models import Application
+        from jobs.models import Category, Job, Location
+        employer_user = make_employer(username="dash_emp_acc", email="dash_emp_acc@example.com")
+        cat = Category.objects.create(name="Design", slug="design")
+        loc = Location.objects.create(name="Lalitpur", slug="lalitpur")
+        job1 = Job.objects.create(
+            employer=employer_user.employer_profile,
+            category=cat,
+            location=loc,
+            title="UI Designer",
+            description="Design great interfaces",
+            application_deadline=datetime.date.today() + datetime.timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+        )
+        job2 = Job.objects.create(
+            employer=employer_user.employer_profile,
+            category=cat,
+            location=loc,
+            title="UX Researcher",
+            description="Research user needs",
+            application_deadline=datetime.date.today() + datetime.timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+        )
+        Application.objects.create(
+            job=job1,
+            jobseeker=self.profile,
+            status=Application.Status.UNDER_REVIEW,
+        )
+        Application.objects.create(
+            job=job2,
+            jobseeker=self.profile,
+            status=Application.Status.INTERVIEW,
+        )
+        response = self._get_dashboard()
+        self.assertEqual(response.context["total_applications"], 2)
+        self.assertEqual(response.context["under_review_count"], 1)
+        self.assertEqual(response.context["interview_count"], 1)
+        self.assertEqual(response.context["selected_count"], 0)
+        recent = list(response.context["recent_applications"])
+        self.assertEqual(len(recent), 2)
+        content = response.content.decode()
+        self.assertIn("Recent Applications", content)
+        self.assertIn("UI Designer", content)
+        self.assertIn("UX Researcher", content)
+
 
 # ---------------------------------------------------------------------------
 # 12. Step 5.1 Employer Form Tests

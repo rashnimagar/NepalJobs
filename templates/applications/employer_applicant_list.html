@@ -9,16 +9,52 @@
   </a>
 </div>
 
+{# Header #}
 <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
   <div>
     <h2 class="mb-1">Applicants for {{ job.title }}</h2>
     <p class="text-muted mb-0">
-      {{ applicants.count }} candidate{{ applicants.count|pluralize }} applied &bull; {{ job.location.name }} &bull; {{ job.get_employment_type_display }}
+      {{ status_counts.all }} total applicant{{ status_counts.all|pluralize }} &bull; {{ job.location.name }} &bull; {{ job.get_employment_type_display }}
     </p>
   </div>
   <div class="d-flex gap-2">
     <a href="{% url 'employer_job_detail' job.pk %}" class="btn btn-outline-secondary">Job Details</a>
     <a href="{% url 'employer_job_list' %}" class="btn btn-outline-primary">My Jobs</a>
+  </div>
+</div>
+
+{# Status Filter Pills #}
+<div class="mb-4">
+  <div class="d-flex flex-wrap gap-2 align-items-center">
+    <span class="text-muted small fw-semibold me-1">Filter by Status:</span>
+    <a href="{% url 'employer_job_applicants' job.pk %}"
+       class="btn btn-sm {% if current_status == 'all' %}btn-dark{% else %}btn-outline-secondary{% endif %} rounded-pill">
+      All <span class="badge bg-secondary ms-1">{{ status_counts.all }}</span>
+    </a>
+    <a href="{% url 'employer_job_applicants' job.pk %}?status=applied"
+       class="btn btn-sm {% if current_status == 'applied' %}btn-primary{% else %}btn-outline-primary{% endif %} rounded-pill">
+      Applied <span class="badge bg-primary ms-1">{{ status_counts.applied }}</span>
+    </a>
+    <a href="{% url 'employer_job_applicants' job.pk %}?status=under_review"
+       class="btn btn-sm {% if current_status == 'under_review' %}btn-info text-white{% else %}btn-outline-info{% endif %} rounded-pill">
+      Under Review <span class="badge bg-info ms-1">{{ status_counts.under_review }}</span>
+    </a>
+    <a href="{% url 'employer_job_applicants' job.pk %}?status=shortlisted"
+       class="btn btn-sm {% if current_status == 'shortlisted' %}btn-warning text-dark{% else %}btn-outline-warning text-dark{% endif %} rounded-pill">
+      Shortlisted <span class="badge bg-warning text-dark ms-1">{{ status_counts.shortlisted }}</span>
+    </a>
+    <a href="{% url 'employer_job_applicants' job.pk %}?status=interview"
+       class="btn btn-sm {% if current_status == 'interview' %}btn-primary{% else %}btn-outline-primary{% endif %} rounded-pill">
+      Interview <span class="badge bg-primary ms-1">{{ status_counts.interview }}</span>
+    </a>
+    <a href="{% url 'employer_job_applicants' job.pk %}?status=selected"
+       class="btn btn-sm {% if current_status == 'selected' %}btn-success{% else %}btn-outline-success{% endif %} rounded-pill">
+      Selected <span class="badge bg-success ms-1">{{ status_counts.selected }}</span>
+    </a>
+    <a href="{% url 'employer_job_applicants' job.pk %}?status=rejected"
+       class="btn btn-sm {% if current_status == 'rejected' %}btn-danger{% else %}btn-outline-danger{% endif %} rounded-pill">
+      Rejected <span class="badge bg-danger ms-1">{{ status_counts.rejected }}</span>
+    </a>
   </div>
 </div>
 
@@ -32,16 +68,16 @@
             <th scope="col">Application Date</th>
             <th scope="col">Status</th>
             <th scope="col">Submitted Resume / CV</th>
-            <th scope="col" class="text-end pe-4">Cover Letter</th>
+            <th scope="col" class="text-end pe-4">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for app in applicants %}
             <tr>
               <td class="ps-4">
-                <div class="fw-semibold text-dark">
+                <a href="{% url 'employer_application_detail' app.pk %}" class="fw-semibold text-decoration-none text-dark">
                   {{ app.jobseeker.user.get_full_name|default:app.jobseeker.user.username }}
-                </div>
+                </a>
                 <div class="text-muted small">
                   {{ app.jobseeker.user.email }}
                   {% if app.jobseeker.phone %} &bull; {{ app.jobseeker.phone }}{% endif %}
@@ -75,12 +111,19 @@
                 {% endif %}
               </td>
               <td class="text-end pe-4">
-                {% if app.cover_letter %}
-                  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#coverLetterModal{{ app.pk }}">
-                    View Letter
-                  </button>
+                <div class="btn-group btn-group-sm">
+                  <a href="{% url 'employer_application_detail' app.pk %}" class="btn btn-primary">
+                    Review Application
+                  </a>
+                  {% if app.cover_letter %}
+                    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#coverLetterModal{{ app.pk }}">
+                      Letter
+                    </button>
+                  {% endif %}
+                </div>
 
-                  {# Cover Letter Modal #}
+                {# Cover Letter Modal #}
+                {% if app.cover_letter %}
                   <div class="modal fade" id="coverLetterModal{{ app.pk }}" tabindex="-1" aria-labelledby="coverLetterModalLabel{{ app.pk }}" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered text-start">
                       <div class="modal-content">
@@ -95,12 +138,11 @@
                         </div>
                         <div class="modal-footer">
                           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                          <a href="{% url 'employer_application_detail' app.pk %}" class="btn btn-primary btn-sm">Full Review</a>
                         </div>
                       </div>
                     </div>
                   </div>
-                {% else %}
-                  <span class="text-muted small">None provided</span>
                 {% endif %}
               </td>
             </tr>
@@ -113,11 +155,19 @@
   <div class="card shadow-sm border-0 text-center py-5">
     <div class="card-body">
       <div class="text-muted mb-3 fs-1">&#128101;</div>
-      <h4 class="fw-bold mb-2">No Applicants Yet</h4>
-      <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
-        No candidates have applied for this position yet. Check back once jobseekers discover and submit applications.
-      </p>
-      <a class="btn btn-outline-primary" href="{% url 'employer_job_detail' job.pk %}">View Job Details</a>
+      {% if current_status != 'all' %}
+        <h4 class="fw-bold mb-2">No Applicants in "{{ current_status|title }}" Stage</h4>
+        <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
+          There are currently no candidates for this job in this stage.
+        </p>
+        <a class="btn btn-outline-primary" href="{% url 'employer_job_applicants' job.pk %}">View All Applicants</a>
+      {% else %}
+        <h4 class="fw-bold mb-2">No Applicants Yet</h4>
+        <p class="text-muted mx-auto mb-4" style="max-width: 480px;">
+          No candidates have applied for this position yet. Check back once jobseekers discover and submit applications.
+        </p>
+        <a class="btn btn-outline-primary" href="{% url 'employer_job_detail' job.pk %}">View Job Details</a>
+      {% endif %}
     </div>
   </div>
 {% endif %}
