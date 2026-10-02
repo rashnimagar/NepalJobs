@@ -209,6 +209,68 @@
   </div>
 
   <div class="col-lg-5">
+    {# Saved Jobs Card #}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <h5 class="mb-0 fw-bold">Saved Jobs</h5>
+            <span class="badge bg-secondary">{{ saved_jobs_count }}</span>
+          </div>
+          {% if saved_jobs_count > 0 %}
+            <a href="{% url 'saved_job_list' %}" class="small text-decoration-none">
+              View all &rarr;
+            </a>
+          {% endif %}
+        </div>
+
+        {% if recent_saved_jobs %}
+          <div class="list-group list-group-flush">
+            {% for sj in recent_saved_jobs %}
+              <div class="list-group-item px-0 py-2 d-flex justify-content-between align-items-start gap-2">
+                <div class="flex-grow-1">
+                  {% if sj.job.is_open %}
+                    <a href="{% url 'job_detail' sj.job.pk %}" class="fw-semibold text-decoration-none text-dark small d-block mb-1">
+                      {{ sj.job.title }}
+                    </a>
+                  {% else %}
+                    <span class="fw-semibold text-muted small d-block mb-1">
+                      {{ sj.job.title }}
+                    </span>
+                  {% endif %}
+                  <div class="text-muted" style="font-size: 0.75rem;">
+                    {{ sj.job.employer.company_name }} &bull; Deadline: {{ sj.job.application_deadline|date:"M d" }}
+                  </div>
+                </div>
+                <div>
+                  {% if sj.job.is_open %}
+                    <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 0.7rem;">Open</span>
+                  {% elif sj.job.status == 'published' and sj.job.application_deadline < today %}
+                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size: 0.7rem;">Expired</span>
+                  {% elif sj.job.status == 'closed' %}
+                    <span class="badge bg-secondary" style="font-size: 0.7rem;">Closed</span>
+                  {% else %}
+                    <span class="badge bg-secondary" style="font-size: 0.7rem;">Unavailable</span>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="mt-3 pt-2 border-top text-center">
+            <a href="{% url 'saved_job_list' %}" class="btn btn-sm btn-outline-primary w-100">
+              View All Saved Jobs ({{ saved_jobs_count }}) &rarr;
+            </a>
+          </div>
+        {% else %}
+          <div class="text-center py-3">
+            <div class="text-muted mb-2 fs-3">&#128278;</div>
+            <p class="text-muted small mb-2">No saved jobs yet. Bookmark jobs while browsing to review them here.</p>
+            <a href="{% url 'job_list' %}" class="btn btn-sm btn-outline-primary">Browse Open Jobs</a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
     {# Quick Links Card #}
     <div class="card shadow-sm border-0 mb-4">
       <div class="card-body p-4">
@@ -217,6 +279,7 @@
           <a class="btn btn-outline-primary" href="{% url 'profile' %}">View my profile</a>
           <a class="btn btn-outline-primary" href="{% url 'cv_list' %}">Manage my CVs</a>
           <a class="btn btn-outline-primary" href="{% url 'jobseeker_application_list' %}">My Applications</a>
+          <a class="btn btn-outline-primary" href="{% url 'saved_job_list' %}">Saved Jobs ({{ saved_jobs_count }})</a>
           <a class="btn btn-outline-secondary" href="{% url 'job_list' %}">Browse Open Jobs</a>
         </div>
       </div>

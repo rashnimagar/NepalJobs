@@ -8,10 +8,11 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.models import Education, EmployerProfile, Skill, User
-from jobs.admin import CategoryAdmin, JobAdmin, LocationAdmin
+from accounts.models import Education, EmployerProfile, JobseekerProfile, Skill, User
+from applications.models import Application
+from jobs.admin import CategoryAdmin, JobAdmin, LocationAdmin, SavedJobAdmin
 from jobs.forms import JobForm
-from jobs.models import Category, Job, Location
+from jobs.models import Category, Job, Location, SavedJob
 
 
 def make_approved_employer(username="emp_approved", email="emp_app@example.com"):
@@ -36,8 +37,8 @@ def make_pending_employer(username="emp_pending", email="emp_pend@example.com"):
         verification_status=EmployerProfile.VerificationStatus.PENDING,
     )
     return profile
-
-
+ 
+ 
 def make_category(name="IT & Telecommunications", slug="it-telecom"):
     return Category.objects.create(name=name, slug=slug)
 
@@ -753,9 +754,11 @@ def make_rejected_employer(username="emp_rejected", email="emp_rej@example.com")
 
 
 def make_jobseeker(username="jobseeker1", email="js1@example.com"):
-    return User.objects.create_user(
+    user = User.objects.create_user(
         username=username, email=email, password="Testpass123!", role=User.Role.JOBSEEKER
     )
+    JobseekerProfile.objects.get_or_create(user=user)
+    return user
 
 
 class EmployerJobAuthTests(TestCase):
@@ -2371,3 +2374,465 @@ class PublicJobUITests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("No Jobs Currently Available", content)
+
+
+# ===========================================================================
+# Step 6.12 Saved Jobs Tests
+# ===========================================================================
+
+class SavedJobModelTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="sjm_emp", email="sjm_emp@example.com")
+        self.category = make_category(name="SJM Cat", slug="sjm-cat")
+        self.location = make_location(name="SJM Loc", slug="sjm-loc")
+        self.user = make_jobseeker(username="sjm_cand", email="sjm_cand@example.com")
+        self.jobseeker = self.user.jobseeker_profile
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Software Engineer",
+            description="Build cool systems.",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_saved_job_creation_and_str(self):
+        saved = SavedJob.objects.create(jobseeker=self.jobseeker, job=self.job)
+        self.assertEqual(saved.jobseeker, self.jobseeker)
+        self.assertEqual(saved.job, self.job)
+        self.assertIsNotNone(saved.created_at)
+        self.assertEqual(str(saved), f"{self.jobseeker} saved {self.job.title}")
+
+    def test_saved_job_unique_constraint(self):
+        SavedJob.objects.create(jobseeker=self.jobseeker, job=self.job)
+        with self.assertRaises(IntegrityError):
+            SavedJob.objects.create(jobseeker=self.jobseeker, job=self.job)
+
+    def test_saved_job_ordering_newest_first(self):
+        job2 = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Frontend Engineer",
+            description="Build UI.",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        saved1 = SavedJob.objects.create(jobseeker=self.jobseeker, job=self.job)
+        saved2 = SavedJob.objects.create(jobseeker=self.jobseeker, job=job2)
+        saved_list = list(SavedJob.objects.filter(jobseeker=self.jobseeker))
+        self.assertEqual(saved_list, [saved2, saved1])
+
+    def test_saved_job_cascade_on_job_delete(self):
+        SavedJob.objects.create(jobseeker=self.jobseeker, job=self.job)
+        self.assertEqual(SavedJob.objects.count(), 1)
+        self.job.delete()
+        self.assertEqual(SavedJob.objects.count(), 0)
+
+    def test_saved_job_cascade_on_jobseeker_delete(self):
+        SavedJob.objects.create(jobseeker=self.jobseeker, job=self.job)
+        self.assertEqual(SavedJob.objects.count(), 1)
+        self.jobseeker.delete()
+        self.assertEqual(SavedJob.objects.count(), 0)
+
+
+class SavedJobSecurityAndAuthorizationTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="sec_emp", email="sec_emp@example.com")
+        self.category = make_category(name="Sec Cat", slug="sec-cat")
+        self.location = make_location(name="Sec Loc", slug="sec-loc")
+        self.cand1 = make_jobseeker(username="sec_cand1", email="sec_cand1@example.com")
+        self.cand2 = make_jobseeker(username="sec_cand2", email="sec_cand2@example.com")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="DevOps Engineer",
+            description="Cloud infrastructure.",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.saved_list_url = reverse("saved_job_list")
+        self.toggle_url = reverse("toggle_save_job", args=[self.job.pk])
+
+    def test_anonymous_saved_list_redirects_to_login(self):
+        response = self.client.get(self.saved_list_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+        self.assertIn(f"next={self.saved_list_url}", response.url)
+
+    def test_anonymous_toggle_save_redirects_to_login(self):
+        response = self.client.post(self.toggle_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+        self.assertEqual(SavedJob.objects.count(), 0)
+
+    def test_employer_cannot_access_saved_job_list(self):
+        self.client.force_login(self.employer.user)
+        response = self.client.get(self.saved_list_url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_employer_cannot_toggle_save_job(self):
+        self.client.force_login(self.employer.user)
+        response = self.client.post(self.toggle_url)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(SavedJob.objects.count(), 0)
+
+    def test_get_method_rejected_on_toggle_endpoint(self):
+        self.client.force_login(self.cand1)
+        response = self.client.get(self.toggle_url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_candidate_isolation_on_saved_list(self):
+        SavedJob.objects.create(jobseeker=self.cand1.jobseeker_profile, job=self.job)
+        self.client.force_login(self.cand2)
+        response = self.client.get(self.saved_list_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["saved_jobs"]), 0)
+        self.assertEqual(response.context["total_count"], 0)
+
+
+class SavedJobToggleActionTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="act_emp", email="act_emp@example.com")
+        self.category = make_category(name="Act Cat", slug="act-cat")
+        self.location = make_location(name="Act Loc", slug="act-loc")
+        self.cand = make_jobseeker(username="act_cand", email="act_cand@example.com")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Backend Engineer",
+            description="API development.",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.toggle_url = reverse("toggle_save_job", args=[self.job.pk])
+        self.client.force_login(self.cand)
+
+    def test_save_open_job(self):
+        response = self.client.post(self.toggle_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(SavedJob.objects.filter(jobseeker=self.cand.jobseeker_profile, job=self.job).exists())
+        self.assertRedirects(response, reverse("job_detail", args=[self.job.pk]))
+
+    def test_unsave_job(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job)
+        response = self.client.post(self.toggle_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SavedJob.objects.filter(jobseeker=self.cand.jobseeker_profile, job=self.job).exists())
+
+    def test_duplicate_save_post_safety(self):
+        self.client.post(self.toggle_url)
+        self.assertEqual(SavedJob.objects.filter(jobseeker=self.cand.jobseeker_profile, job=self.job).count(), 1)
+        self.client.post(self.toggle_url)
+        self.assertEqual(SavedJob.objects.filter(jobseeker=self.cand.jobseeker_profile, job=self.job).count(), 0)
+
+    def test_toggle_nonexistent_job_returns_404(self):
+        response = self.client.post(reverse("toggle_save_job", args=[999999]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_safe_redirect_with_next_param(self):
+        next_path = reverse("job_list")
+        response = self.client.post(self.toggle_url, {"next": next_path})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, next_path)
+
+    def test_open_redirect_prevention(self):
+        response = self.client.post(self.toggle_url, {"next": "https://malicious-external-site.com"})
+        self.assertEqual(response.status_code, 302)
+        self.assertNotEqual(response.url, "https://malicious-external-site.com")
+        self.assertEqual(response.url, reverse("job_detail", args=[self.job.pk]))
+
+
+class SavedJobLifecycleTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="lc_emp", email="lc_emp@example.com")
+        self.category = make_category(name="LC Cat", slug="lc-cat")
+        self.location = make_location(name="LC Loc", slug="lc-loc")
+        self.cand = make_jobseeker(username="lc_cand", email="lc_cand@example.com")
+        today = timezone.localdate()
+
+        self.open_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Open Position",
+            description="Active role.",
+            application_deadline=today + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.expired_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Expired Position",
+            description="Old role.",
+            application_deadline=today - timedelta(days=2),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=30),
+        )
+        self.closed_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Closed Position",
+            description="Filled role.",
+            application_deadline=today + timedelta(days=5),
+            status=Job.Status.CLOSED,
+            published_at=timezone.now() - timedelta(days=10),
+        )
+        self.client.force_login(self.cand)
+
+    def test_expired_saved_job_remains_visible_with_expired_badge(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.expired_job)
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Expired Position", content)
+        self.assertIn("Expired", content)
+
+    def test_closed_saved_job_remains_visible_with_closed_badge(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.closed_job)
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Closed Position", content)
+        self.assertIn("Closed", content)
+
+    def test_draft_or_unapproved_saved_job_displays_unavailable_badge(self):
+        draft_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Secret Draft Position",
+            description="Draft role.",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.DRAFT,
+        )
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=draft_job)
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Secret Draft Position", content)
+        self.assertIn("Unavailable", content)
+
+    def test_open_saved_job_is_actionable(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.open_job)
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Open Position", content)
+        self.assertIn("Open", content)
+        self.assertIn("Apply Now", content)
+        self.assertIn("View Job", content)
+
+    def test_candidate_can_unsave_expired_or_closed_job(self):
+        saved = SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.closed_job)
+        response = self.client.post(reverse("toggle_save_job", args=[self.closed_job.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SavedJob.objects.filter(pk=saved.pk).exists())
+        self.assertEqual(response.url, reverse("saved_job_list"))
+
+
+class SavedJobListViewTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="lv_emp", email="lv_emp@example.com")
+        self.category = make_category(name="LV Cat", slug="lv-cat")
+        self.location = make_location(name="LV Loc", slug="lv-loc")
+        self.cand = make_jobseeker(username="lv_cand", email="lv_cand@example.com")
+        today = timezone.localdate()
+
+        self.job1 = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="React Developer",
+            description="Frontend role.",
+            employment_type=Job.EmploymentType.FULL_TIME,
+            salary_min=40000,
+            salary_max=60000,
+            application_deadline=today + timedelta(days=7),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.job2 = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Django Developer",
+            description="Backend role.",
+            employment_type=Job.EmploymentType.CONTRACT,
+            salary_min=50000,
+            salary_max=80000,
+            application_deadline=today - timedelta(days=1),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=15),
+        )
+        self.client.force_login(self.cand)
+
+    def test_saved_job_list_renders_all_required_details(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job1)
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("My Saved Jobs", content)
+        self.assertIn("Browse Jobs", content)
+        self.assertIn("React Developer", content)
+        self.assertIn(self.employer.company_name, content)
+        self.assertIn(self.location.name, content)
+        self.assertIn("Full-time", content)
+        self.assertIn("Rs. 40,000 – Rs. 60,000", content)
+        self.assertIn("Open", content)
+        self.assertIn("Unsave", content)
+
+    def test_status_filters_all_open_and_closed(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job1)
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job2)
+
+        # All filter
+        response_all = self.client.get(reverse("saved_job_list"), {"status": "all"})
+        self.assertEqual(response_all.status_code, 200)
+        self.assertEqual(len(response_all.context["saved_jobs"]), 2)
+
+        # Open filter
+        response_open = self.client.get(reverse("saved_job_list"), {"status": "open"})
+        self.assertEqual(response_open.status_code, 200)
+        self.assertEqual(len(response_open.context["saved_jobs"]), 1)
+        self.assertEqual(response_open.context["saved_jobs"][0].job, self.job1)
+
+        # Closed filter
+        response_closed = self.client.get(reverse("saved_job_list"), {"status": "closed"})
+        self.assertEqual(response_closed.status_code, 200)
+        self.assertEqual(len(response_closed.context["saved_jobs"]), 1)
+        self.assertEqual(response_closed.context["saved_jobs"][0].job, self.job2)
+
+    def test_pagination_and_query_param_preservation(self):
+        today = timezone.localdate()
+        for i in range(12):
+            j = Job.objects.create(
+                employer=self.employer,
+                category=self.category,
+                location=self.location,
+                title=f"Paged Job {i}",
+                description="Paged desc.",
+                application_deadline=today + timedelta(days=10),
+                status=Job.Status.PUBLISHED,
+                published_at=timezone.now(),
+            )
+            SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=j)
+
+        response_p1 = self.client.get(reverse("saved_job_list"), {"status": "open", "page": 1})
+        self.assertEqual(response_p1.status_code, 200)
+        self.assertEqual(len(response_p1.context["saved_jobs"]), 10)
+        self.assertTrue(response_p1.context["page_obj"].has_next())
+        content_p1 = response_p1.content.decode()
+        self.assertIn("status=open&page=2", content_p1)
+
+        response_p2 = self.client.get(reverse("saved_job_list"), {"status": "open", "page": 2})
+        self.assertEqual(response_p2.status_code, 200)
+        self.assertEqual(len(response_p2.context["saved_jobs"]), 2)
+
+    def test_already_applied_indicator_and_link(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job1)
+        app = Application.objects.create(
+            job=self.job1,
+            jobseeker=self.cand.jobseeker_profile,
+            cover_letter="Cover letter text",
+        )
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Already Applied", content)
+        self.assertIn(reverse("jobseeker_application_detail", args=[app.pk]), content)
+        self.assertIn("View Application", content)
+
+    def test_saved_job_list_empty_state(self):
+        response = self.client.get(reverse("saved_job_list"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("No Saved Jobs Found", content)
+        self.assertIn("Browse Jobs", content)
+
+
+class SavedJobDiscoveryIntegrationTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="disc_emp", email="disc_emp@example.com")
+        self.category = make_category(name="Disc Cat", slug="disc-cat")
+        self.location = make_location(name="Disc Loc", slug="disc-loc")
+        self.cand = make_jobseeker(username="disc_cand", email="disc_cand@example.com")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Fullstack Developer",
+            description="Exciting role.",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.detail_url = reverse("job_detail", args=[self.job.pk])
+        self.list_url = reverse("job_list")
+
+    def test_job_detail_shows_save_button_when_unsaved(self):
+        self.client.force_login(self.cand)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Save Job", content)
+        self.assertIn(reverse("toggle_save_job", args=[self.job.pk]), content)
+
+    def test_job_detail_shows_saved_button_when_saved(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job)
+        self.client.force_login(self.cand)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Saved", content)
+        self.assertIn(reverse("toggle_save_job", args=[self.job.pk]), content)
+
+    def test_job_detail_shows_login_link_for_anonymous(self):
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Save Job", content)
+        self.assertIn(f"{reverse('login')}?next={self.detail_url}", content)
+
+    def test_job_detail_hides_save_button_for_employer(self):
+        self.client.force_login(self.employer.user)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertNotIn(reverse("toggle_save_job", args=[self.job.pk]), content)
+
+    def test_job_list_shows_saved_state_on_cards(self):
+        SavedJob.objects.create(jobseeker=self.cand.jobseeker_profile, job=self.job)
+        self.client.force_login(self.cand)
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.job.pk, response.context["saved_job_ids"])
+        content = response.content.decode()
+        self.assertIn("Saved", content)
+
+    def test_job_list_hides_save_controls_for_employer(self):
+        self.client.force_login(self.employer.user)
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["saved_job_ids"]), 0)
+        content = response.content.decode()
+        self.assertNotIn(reverse("toggle_save_job", args=[self.job.pk]), content)
+
+
+class SavedJobAdminTests(TestCase):
+    def test_saved_job_admin_registered(self):
+        self.assertIn(SavedJob, site._registry)
+        admin_instance = site._registry[SavedJob]
+        self.assertIsInstance(admin_instance, SavedJobAdmin)
+        self.assertEqual(admin_instance.ordering, ("-created_at",))
+

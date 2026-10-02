@@ -1915,3 +1915,72 @@ class Step611CandidateUpcomingInterviewsTests(TestCase):
         upcoming = list(response.context["upcoming_interviews"])
         self.assertIn(self.int_cand2, upcoming)
         self.assertNotIn(self.int_future, upcoming)
+
+
+class Step612CandidateDashboardSavedJobsTests(TestCase):
+    def setUp(self):
+        self.employer_user = make_employer(username="dash_emp", email="dash_emp@example.com")
+        self.employer = self.employer_user.employer_profile
+        self.employer.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.employer.save()
+
+        from jobs.models import Category, Location, Job
+        self.cat = Category.objects.create(name="Dash Cat", slug="dash-cat")
+        self.loc = Location.objects.create(name="Dash Loc", slug="dash-loc")
+
+        self.cand1 = make_jobseeker(username="dash_cand1", email="dash_cand1@example.com")
+        self.cand2 = make_jobseeker(username="dash_cand2", email="dash_cand2@example.com")
+
+        today = timezone.localdate()
+        self.jobs = []
+        for i in range(5):
+            j = Job.objects.create(
+                employer=self.employer,
+                category=self.cat,
+                location=self.loc,
+                title=f"Dash Position {i}",
+                description="Dashboard test role.",
+                application_deadline=today + timedelta(days=10 + i),
+                status=Job.Status.PUBLISHED,
+                published_at=timezone.now(),
+            )
+            self.jobs.append(j)
+
+        self.dash_url = reverse("jobseeker_dashboard")
+
+    def test_candidate_dashboard_saved_jobs_count_and_recent_3(self):
+        from jobs.models import SavedJob
+        # Save 4 jobs for cand1
+        for j in self.jobs[:4]:
+            SavedJob.objects.create(jobseeker=self.cand1.jobseeker_profile, job=j)
+
+        self.client.force_login(self.cand1)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["saved_jobs_count"], 4)
+        recent = list(response.context["recent_saved_jobs"])
+        self.assertEqual(len(recent), 3)
+
+        content = response.content.decode()
+        self.assertIn("Saved Jobs", content)
+        self.assertIn("View All Saved Jobs (4)", content)
+        self.assertIn(reverse("saved_job_list"), content)
+
+    def test_candidate_dashboard_saved_jobs_candidate_isolation(self):
+        from jobs.models import SavedJob
+        SavedJob.objects.create(jobseeker=self.cand1.jobseeker_profile, job=self.jobs[0])
+
+        self.client.force_login(self.cand2)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["saved_jobs_count"], 0)
+        self.assertEqual(len(response.context["recent_saved_jobs"]), 0)
+
+    def test_candidate_dashboard_quick_links_includes_saved_jobs(self):
+        self.client.force_login(self.cand1)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn(f'href="{reverse("saved_job_list")}"', content)
+        self.assertIn("Saved Jobs (0)", content)
+

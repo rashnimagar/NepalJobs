@@ -34,6 +34,7 @@
               <li class="nav-item"><a class="nav-link" href="{% url 'profile' %}">My Profile</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'cv_list' %}">My CVs</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'jobseeker_application_list' %}">My Applications</a></li>
+              <li class="nav-item"><a class="nav-link" href="{% url 'saved_job_list' %}">Saved Jobs</a></li>
             {% elif user.is_employer and not user.is_staff %}
               {% if user.employer_profile.is_approved %}
                 <li class="nav-item"><a class="nav-link" href="{% url 'employer_job_list' %}">My Jobs</a></li>

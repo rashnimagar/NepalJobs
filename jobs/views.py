@@ -1,13 +1,16 @@
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from accounts.decorators import approved_employer_required
+from accounts.decorators import approved_employer_required, jobseeker_required
+from accounts.models import EmployerProfile
 from jobs.forms import JobForm
-from jobs.models import Category, Job, Location
+from jobs.models import Category, Job, Location, SavedJob
 
 PAGE_SIZE = 10
 
@@ -81,6 +84,15 @@ def job_list(request):
         or (sort and sort != "newest")
     )
 
+    saved_job_ids = set()
+    if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
+        profile = getattr(request.user, "jobseeker_profile", None)
+        if profile:
+            page_job_ids = [j.pk for j in page_obj.object_list]
+            saved_job_ids = set(
+                profile.saved_jobs.filter(job_id__in=page_job_ids).values_list("job_id", flat=True)
+            )
+
     return render(
         request,
         "jobs/job_list.html",
@@ -99,6 +111,7 @@ def job_list(request):
             "query_string": query_string,
             "has_filters": has_filters,
             "total_count": paginator.count,
+            "saved_job_ids": saved_job_ids,
         },
     )
 
@@ -112,11 +125,13 @@ def job_detail(request, pk):
     )
     user_application = None
     has_active_cv = False
+    is_saved = False
     if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
         profile = getattr(request.user, "jobseeker_profile", None)
         if profile:
             user_application = profile.applications.filter(job=job).first()
             has_active_cv = profile.cvs.filter(is_active=True).exists()
+            is_saved = profile.saved_jobs.filter(job=job).exists()
 
     return render(
         request,
@@ -125,6 +140,103 @@ def job_detail(request, pk):
             "job": job,
             "user_application": user_application,
             "has_active_cv": has_active_cv,
+            "is_saved": is_saved,
+        },
+    )
+
+
+@jobseeker_required
+@require_POST
+def toggle_save_job(request, pk):
+    job = get_object_or_404(Job, pk=pk)
+    profile = request.user.jobseeker_profile
+
+    saved_job = profile.saved_jobs.filter(job=job).first()
+    if saved_job:
+        saved_job.delete()
+        messages.info(request, f"'{job.title}' has been removed from your saved jobs.")
+    else:
+        profile.saved_jobs.get_or_create(job=job)
+        messages.success(request, f"'{job.title}' has been added to your saved jobs.")
+
+    next_url = request.POST.get("next") or request.META.get("HTTP_REFERER")
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(next_url)
+    if job.is_open:
+        return redirect("job_detail", pk=job.pk)
+    return redirect("saved_job_list")
+
+
+@jobseeker_required
+def saved_job_list(request):
+    profile = request.user.jobseeker_profile
+    today = timezone.localdate()
+
+    open_q = Q(
+        job__status=Job.Status.PUBLISHED,
+        job__application_deadline__gte=today,
+        job__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
+    )
+
+    filter_counts = profile.saved_jobs.aggregate(
+        total=Count("id"),
+        open=Count("id", filter=open_q),
+        closed=Count("id", filter=~open_q),
+    )
+
+    status_filter = request.GET.get("status", "all").strip().lower()
+    saved_qs = (
+        profile.saved_jobs.select_related(
+            "job",
+            "job__employer",
+            "job__location",
+            "job__category",
+        )
+        .prefetch_related("job__required_skills")
+        .order_by("-created_at")
+    )
+
+    if status_filter == "open":
+        saved_qs = saved_qs.filter(open_q)
+    elif status_filter in ("closed", "expired", "closed_expired"):
+        status_filter = "closed"
+        saved_qs = saved_qs.filter(~open_q)
+    else:
+        status_filter = "all"
+
+    paginator = Paginator(saved_qs, 10)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    page_job_ids = [sj.job_id for sj in page_obj.object_list]
+    applied_apps = {
+        app.job_id: app.pk
+        for app in profile.applications.filter(job_id__in=page_job_ids)
+    }
+    for sj in page_obj.object_list:
+        sj.user_application_pk = applied_apps.get(sj.job_id)
+
+    query_params = request.GET.copy()
+    if "page" in query_params:
+        del query_params["page"]
+    query_string = query_params.urlencode()
+
+    return render(
+        request,
+        "jobs/saved_job_list.html",
+        {
+            "page_obj": page_obj,
+            "saved_jobs": page_obj.object_list,
+            "applied_apps": applied_apps,
+            "current_status": status_filter,
+            "filter_counts": filter_counts,
+            "total_count": filter_counts["total"],
+            "query_string": query_string,
+            "today": today,
         },
     )
 

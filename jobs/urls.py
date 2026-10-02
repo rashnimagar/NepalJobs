@@ -11,5 +11,7 @@ urlpatterns = [
     path("jobs/employer/<int:pk>/edit/", views.employer_job_edit, name="employer_job_edit"),
     path("jobs/employer/<int:pk>/publish/", views.employer_job_publish, name="employer_job_publish"),
     path("jobs/employer/<int:pk>/close/", views.employer_job_close, name="employer_job_close"),
+    path("jobs/saved/", views.saved_job_list, name="saved_job_list"),
+    path("jobs/<int:pk>/save/", views.toggle_save_job, name="toggle_save_job"),
     path("jobs/<int:pk>/", views.job_detail, name="job_detail"),
 ]

@@ -1,0 +1,278 @@
+{% extends 'base.html' %}
+
+{% block title %}My Saved Jobs - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
+  <div>
+    <h2 class="mb-1">My Saved Jobs</h2>
+    <p class="text-muted mb-0">Jobs you've bookmarked for later review and application.</p>
+  </div>
+  <div>
+    <a href="{% url 'job_list' %}" class="btn btn-primary">Browse Jobs</a>
+  </div>
+</div>
+
+{# Status Filter Pills #}
+<div class="mb-4">
+  <div class="d-flex flex-wrap gap-2 align-items-center">
+    <span class="text-muted small fw-semibold me-1">Filter:</span>
+    <a href="{% url 'saved_job_list' %}"
+       class="btn btn-sm {% if current_status == 'all' %}btn-dark{% else %}btn-outline-secondary{% endif %} rounded-pill">
+      All <span class="badge bg-secondary ms-1">{{ filter_counts.total }}</span>
+    </a>
+    <a href="{% url 'saved_job_list' %}?status=open"
+       class="btn btn-sm {% if current_status == 'open' %}btn-success{% else %}btn-outline-success{% endif %} rounded-pill">
+      Open <span class="badge bg-success ms-1">{{ filter_counts.open }}</span>
+    </a>
+    <a href="{% url 'saved_job_list' %}?status=closed"
+       class="btn btn-sm {% if current_status == 'closed' %}btn-secondary{% else %}btn-outline-secondary{% endif %} rounded-pill">
+      Closed / Expired <span class="badge bg-secondary ms-1">{{ filter_counts.closed }}</span>
+    </a>
+  </div>
+</div>
+
+{% if saved_jobs %}
+  {# Desktop Table View #}
+  <div class="card shadow-sm border-0 d-none d-lg-block mb-4">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col" class="ps-4">Job Title & Company</th>
+            <th scope="col">Location & Type</th>
+            <th scope="col">Salary</th>
+            <th scope="col">Deadline</th>
+            <th scope="col">Availability</th>
+            <th scope="col">Application</th>
+            <th scope="col" class="text-end pe-4">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sj in saved_jobs %}
+            <tr>
+              <td class="ps-4">
+                {% if sj.job.is_open %}
+                  <a href="{% url 'job_detail' sj.job.pk %}" class="fw-semibold text-decoration-none text-dark">
+                    {{ sj.job.title }}
+                  </a>
+                {% else %}
+                  <span class="fw-semibold text-muted">
+                    {{ sj.job.title }}
+                  </span>
+                {% endif %}
+                <div class="text-muted small">
+                  {{ sj.job.employer.company_name }}
+                </div>
+              </td>
+              <td>
+                <div>{{ sj.job.location.name }}</div>
+                <div class="small text-muted">
+                  {{ sj.job.get_employment_type_display }}
+                  {% if sj.job.is_remote %}
+                    <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+                  {% endif %}
+                </div>
+              </td>
+              <td class="small">{{ sj.job.salary_display }}</td>
+              <td class="small">
+                <div>{{ sj.job.application_deadline|date:"M d, Y" }}</div>
+                <div class="text-muted" style="font-size: 0.75rem;">Saved {{ sj.created_at|date:"M d" }}</div>
+              </td>
+              <td>
+                {% if sj.job.is_open %}
+                  <span class="badge bg-success-subtle text-success border border-success-subtle">Open</span>
+                {% elif sj.job.status == 'published' and sj.job.application_deadline < today %}
+                  <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Expired</span>
+                {% elif sj.job.status == 'closed' %}
+                  <span class="badge bg-secondary">Closed</span>
+                {% else %}
+                  <span class="badge bg-secondary">Unavailable</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if sj.user_application_pk %}
+                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Already Applied</span>
+                {% elif sj.job.is_open %}
+                  <span class="badge bg-light text-muted border">Not Applied</span>
+                {% else %}
+                  <span class="badge bg-light text-muted border">&mdash;</span>
+                {% endif %}
+              </td>
+              <td class="text-end pe-4">
+                <div class="d-inline-flex align-items-center gap-1">
+                  {% if sj.user_application_pk %}
+                    <a href="{% url 'jobseeker_application_detail' sj.user_application_pk %}" class="btn btn-sm btn-outline-primary" title="View your application">
+                      View Application
+                    </a>
+                  {% elif sj.job.is_open %}
+                    <a href="{% url 'apply_job' sj.job.pk %}" class="btn btn-sm btn-primary" title="Apply for this position">
+                      Apply Now
+                    </a>
+                  {% endif %}
+                  {% if sj.job.is_open %}
+                    <a href="{% url 'job_detail' sj.job.pk %}" class="btn btn-sm btn-outline-secondary" title="View job details">
+                      View Job
+                    </a>
+                  {% else %}
+                    <span class="btn btn-sm btn-outline-secondary disabled" title="Job is no longer open">
+                      View Job
+                    </span>
+                  {% endif %}
+                  <form method="post" action="{% url 'toggle_save_job' sj.job.pk %}" class="d-inline m-0">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove from saved jobs" aria-label="Remove {{ sj.job.title }} from saved jobs">
+                      Unsave
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Mobile / Tablet Card List View #}
+  <div class="d-lg-none d-flex flex-column gap-3 mb-4">
+    {% for sj in saved_jobs %}
+      <div class="card shadow-sm border-0">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+            <div>
+              {% if sj.job.is_open %}
+                <a href="{% url 'job_detail' sj.job.pk %}" class="fw-semibold text-decoration-none text-dark h6 mb-1 d-block">
+                  {{ sj.job.title }}
+                </a>
+              {% else %}
+                <span class="fw-semibold text-muted h6 mb-1 d-block">
+                  {{ sj.job.title }}
+                </span>
+              {% endif %}
+              <div class="text-muted small">
+                {{ sj.job.employer.company_name }} &bull; {{ sj.job.location.name }}
+                {% if sj.job.is_remote %}
+                  <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="d-flex flex-column align-items-end gap-1">
+              {% if sj.job.is_open %}
+                <span class="badge bg-success-subtle text-success border border-success-subtle">Open</span>
+              {% elif sj.job.status == 'published' and sj.job.application_deadline < today %}
+                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Expired</span>
+              {% elif sj.job.status == 'closed' %}
+                <span class="badge bg-secondary">Closed</span>
+              {% else %}
+                <span class="badge bg-secondary">Unavailable</span>
+              {% endif %}
+              {% if sj.user_application_pk %}
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Already Applied</span>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="small text-muted mb-3 d-flex flex-wrap gap-2">
+            <span><strong>Salary:</strong> {{ sj.job.salary_display }}</span>
+            <span>&bull;</span>
+            <span><strong>Deadline:</strong> {{ sj.job.application_deadline|date:"M d, Y" }}</span>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center pt-2 border-top">
+            <span class="text-muted small" style="font-size: 0.75rem;">
+              Saved {{ sj.created_at|date:"M d, Y" }}
+            </span>
+            <div class="d-inline-flex gap-2">
+              <form method="post" action="{% url 'toggle_save_job' sj.job.pk %}" class="d-inline m-0">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove from saved jobs" aria-label="Remove {{ sj.job.title }} from saved jobs">
+                  Unsave
+                </button>
+              </form>
+              {% if sj.job.is_open %}
+                <a href="{% url 'job_detail' sj.job.pk %}" class="btn btn-sm btn-outline-secondary">
+                  View Job
+                </a>
+              {% else %}
+                <span class="btn btn-sm btn-outline-secondary disabled">
+                  View Job
+                </span>
+              {% endif %}
+              {% if sj.user_application_pk %}
+                <a href="{% url 'jobseeker_application_detail' sj.user_application_pk %}" class="btn btn-sm btn-outline-primary">
+                  View Application
+                </a>
+              {% elif sj.job.is_open %}
+                <a href="{% url 'apply_job' sj.job.pk %}" class="btn btn-sm btn-primary">
+                  Apply Now
+                </a>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# Pagination #}
+  {% if page_obj.has_other_pages %}
+    <nav aria-label="Saved jobs pagination" class="mt-4">
+      <ul class="pagination justify-content-center">
+        {% if page_obj.has_previous %}
+          <li class="page-item">
+            <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}" aria-label="Previous">
+              &laquo; Previous
+            </a>
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">&laquo; Previous</span></li>
+        {% endif %}
+
+        {% for num in page_obj.paginator.page_range %}
+          {% if page_obj.number == num %}
+            <li class="page-item active" aria-current="page"><span class="page-link">{{ num }}</span></li>
+          {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+            <li class="page-item">
+              <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ num }}">{{ num }}</a>
+            </li>
+          {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+          <li class="page-item">
+            <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}" aria-label="Next">
+              Next &raquo;
+            </a>
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">Next &raquo;</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+
+{% else %}
+  <div class="card shadow-sm border-0 text-center py-5">
+    <div class="card-body">
+      <div class="text-muted mb-3 fs-1">&#128278;</div>
+      <h4 class="fw-bold mb-2">No Saved Jobs Found</h4>
+      <p class="text-muted small mb-4 mx-auto" style="max-width: 480px;">
+        {% if current_status != 'all' %}
+          You have no saved jobs matching the "<strong>{{ current_status|title }}</strong>" filter. Try switching back to all saved jobs.
+        {% else %}
+          You haven't bookmarked any jobs yet. When browsing open positions, click the "Save Job" button to keep track of opportunities you're interested in.
+        {% endif %}
+      </p>
+      <div class="d-flex justify-content-center gap-2">
+        {% if current_status != 'all' %}
+          <a href="{% url 'saved_job_list' %}" class="btn btn-outline-secondary">Show All Saved Jobs</a>
+        {% endif %}
+        <a href="{% url 'job_list' %}" class="btn btn-primary">Browse Open Jobs</a>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

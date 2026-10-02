@@ -107,6 +107,13 @@ def jobseeker_dashboard(request):
         .order_by("scheduled_at")[:5]
     )
 
+    # Saved jobs for candidate
+    saved_jobs_count = profile.saved_jobs.count()
+    recent_saved_jobs = (
+        profile.saved_jobs.select_related("job", "job__employer", "job__location")
+        .order_by("-created_at")[:3]
+    )
+
     return render(request, "accounts/jobseeker_dashboard.html", {
         "steps": steps,
         "done": done,
@@ -119,6 +126,9 @@ def jobseeker_dashboard(request):
         "selected_count": app_metrics["selected"],
         "recent_applications": recent_applications,
         "upcoming_interviews": upcoming_interviews,
+        "saved_jobs_count": saved_jobs_count,
+        "recent_saved_jobs": recent_saved_jobs,
+        "today": timezone.localdate(),
     })
 
 

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from jobs.models import Category, Job, Location
+from jobs.models import Category, Job, Location, SavedJob
 
 
 @admin.register(Category)
@@ -119,3 +119,18 @@ class JobAdmin(admin.ModelAdmin):
         if obj is None or not getattr(obj, "employer_id", None):
             return False
         return obj.is_open
+
+
+@admin.register(SavedJob)
+class SavedJobAdmin(admin.ModelAdmin):
+    list_display = ("jobseeker", "job", "created_at")
+    list_filter = ("created_at",)
+    search_fields = (
+        "jobseeker__user__username",
+        "jobseeker__user__email",
+        "job__title",
+        "job__employer__company_name",
+    )
+    raw_id_fields = ("jobseeker", "job")
+    readonly_fields = ("created_at",)
+    ordering = ("-created_at",)

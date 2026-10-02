@@ -181,6 +181,30 @@
             Staff and administrative accounts cannot submit job applications.
           </p>
         {% endif %}
+
+        {% if user.is_authenticated and user.is_jobseeker %}
+          <div class="mt-3 pt-3 border-top">
+            <form method="post" action="{% url 'toggle_save_job' job.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              {% if is_saved %}
+                <button type="submit" class="btn btn-outline-danger w-100 btn-sm fw-medium" aria-label="Remove this job from saved jobs">
+                  &#9733; Saved
+                </button>
+              {% else %}
+                <button type="submit" class="btn btn-outline-primary w-100 btn-sm fw-medium" aria-label="Save this job">
+                  &#9734; Save Job
+                </button>
+              {% endif %}
+            </form>
+          </div>
+        {% elif not user.is_authenticated %}
+          <div class="mt-3 pt-3 border-top">
+            <a href="{% url 'login' %}?next={{ request.get_full_path }}" class="btn btn-outline-secondary btn-sm w-100" title="Log in to save this job">
+              &#9734; Save Job
+            </a>
+          </div>
+        {% endif %}
       </div>
     </div>
 

@@ -203,3 +203,32 @@ class Job(models.Model):
     def close(self):
         self.status = self.Status.CLOSED
         self.save()
+
+
+class SavedJob(models.Model):
+    jobseeker = models.ForeignKey(
+        "accounts.JobseekerProfile",
+        on_delete=models.CASCADE,
+        related_name="saved_jobs",
+    )
+    job = models.ForeignKey(
+        "jobs.Job",
+        on_delete=models.CASCADE,
+        related_name="saved_by_jobseekers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["jobseeker", "job"],
+                name="unique_saved_job",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["jobseeker", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.jobseeker} saved {self.job.title}"
