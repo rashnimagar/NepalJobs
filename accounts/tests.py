@@ -1984,3 +1984,323 @@ class Step612CandidateDashboardSavedJobsTests(TestCase):
         self.assertIn(f'href="{reverse("saved_job_list")}"', content)
         self.assertIn("Saved Jobs (0)", content)
 
+
+# ===========================================================================
+# Step 6.13 — Public Employer / Company Experience Tests
+# ===========================================================================
+
+class Step613PublicCompanyExperienceTests(TestCase):
+
+    def setUp(self):
+        self.category = Category.objects.create(name="Engineering", slug="engineering-comp")
+        self.location = Location.objects.create(name="Kathmandu", slug="ktm-comp")
+
+        # Approved Company A
+        self.emp_a_user = make_employer("emp_apex", "emp_apex@example.com")
+        self.profile_a = self.emp_a_user.employer_profile
+        self.profile_a.company_name = "Apex Solutions"
+        self.profile_a.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile_a.industry = "FinTech"
+        self.profile_a.address = "Putalisadak, Kathmandu"
+        self.profile_a.website = "https://apexsolutions.example.com"
+        self.profile_a.phone = "+977-1-4222222"
+        self.profile_a.description = "Apex Solutions is a leading payments provider."
+        self.profile_a.rejection_reason = "CONFIDENTIAL_ADMIN_NOTE_NEVER_SHOW"
+        self.profile_a.verification_document = SimpleUploadedFile(
+            "confidential_tax_cert.pdf",
+            b"%PDF-1.4 private tax doc",
+            content_type="application/pdf",
+        )
+        self.profile_a.save()
+
+        # Approved Company B (no jobs initially)
+        self.emp_b_user = make_employer("emp_beta", "emp_beta@example.com")
+        self.profile_b = self.emp_b_user.employer_profile
+        self.profile_b.company_name = "Beta Corp"
+        self.profile_b.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile_b.save()
+
+        # Pending Company C
+        self.emp_c_user = make_employer("emp_gamma", "emp_gamma@example.com")
+        self.profile_c = self.emp_c_user.employer_profile
+        self.profile_c.verification_status = EmployerProfile.VerificationStatus.PENDING
+        self.profile_c.save()
+
+        # Rejected Company D
+        self.emp_d_user = make_employer("emp_delta", "emp_delta@example.com")
+        self.profile_d = self.emp_d_user.employer_profile
+        self.profile_d.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.profile_d.save()
+
+        # Jobseekers
+        self.cand1 = make_jobseeker("cand_co1", "cand_co1@example.com")
+        self.cand2 = make_jobseeker("cand_co2", "cand_co2@example.com")
+
+        # Jobs for Company A: 2 open, 1 draft, 1 closed, 1 expired
+        self.open_job_1 = Job.objects.create(
+            employer=self.profile_a,
+            title="Senior Backend Engineer",
+            description="Python and Django backend systems.",
+            category=self.category,
+            location=self.location,
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+        self.open_job_2 = Job.objects.create(
+            employer=self.profile_a,
+            title="Frontend Engineer",
+            description="React, CSS, and modern user interfaces.",
+            category=self.category,
+            location=self.location,
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=5),
+        )
+        self.draft_job = Job.objects.create(
+            employer=self.profile_a,
+            title="Draft DevOps Role",
+            description="Kubernetes and Terraform setup.",
+            category=self.category,
+            location=self.location,
+            status=Job.Status.DRAFT,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+        self.closed_job = Job.objects.create(
+            employer=self.profile_a,
+            title="Closed Sales Executive",
+            description="Enterprise corporate sales.",
+            category=self.category,
+            location=self.location,
+            status=Job.Status.CLOSED,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+        self.expired_job = Job.objects.create(
+            employer=self.profile_a,
+            title="Expired Product Manager",
+            description="Product roadmaps and strategy.",
+            category=self.category,
+            location=self.location,
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() - timedelta(days=1),
+        )
+
+        # Job for Company B
+        self.other_job = Job.objects.create(
+            employer=self.profile_b,
+            title="Beta Corp Marketer",
+            description="Marketing campaigns.",
+            category=self.category,
+            location=self.location,
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+
+    def test_anonymous_guest_can_view_approved_company(self):
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["company"], self.profile_a)
+        self.assertEqual(response.context["open_jobs_count"], 2)
+        content = response.content.decode()
+        self.assertIn("Apex Solutions", content)
+        self.assertIn("Verified Company", content)
+        self.assertIn("FinTech", content)
+        self.assertIn("Putalisadak, Kathmandu", content)
+        self.assertIn("https://apexsolutions.example.com", content)
+        self.assertIn("+977-1-4222222", content)
+        self.assertIn("Active Job Vacancies (2)", content)
+
+    def test_authenticated_jobseeker_can_view_approved_company(self):
+        self.client.force_login(self.cand1)
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["open_jobs_count"], 2)
+
+    def test_pending_company_returns_404(self):
+        url = reverse("company_detail", args=[self.profile_c.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_rejected_company_returns_404(self):
+        url = reverse("company_detail", args=[self.profile_d.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_nonexistent_company_returns_404(self):
+        url = reverse("company_detail", args=[999999])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_private_fields_and_account_credentials_never_exposed(self):
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        content = response.content.decode()
+        self.assertNotIn("CONFIDENTIAL_ADMIN_NOTE_NEVER_SHOW", content)
+        self.assertNotIn("confidential_tax_cert.pdf", content)
+        self.assertNotIn(self.profile_a.verification_document.name, content)
+        self.assertNotIn("emp_apex@example.com", content)
+        self.assertNotIn("emp_apex", content)
+        self.assertNotIn("private_media", content)
+
+    def test_open_jobs_filtering_shows_only_open_jobs_of_this_company(self):
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+
+        # Published open jobs belonging to Company A must appear
+        self.assertIn("Senior Backend Engineer", content)
+        self.assertIn("Frontend Engineer", content)
+
+        # Draft, closed, expired, and other company's jobs must NOT appear
+        self.assertNotIn("Draft DevOps Role", content)
+        self.assertNotIn("Closed Sales Executive", content)
+        self.assertNotIn("Expired Product Manager", content)
+        self.assertNotIn("Beta Corp Marketer", content)
+
+    def test_zero_open_jobs_renders_polite_empty_state(self):
+        # Delete Company B's single job so it has 0 open jobs
+        self.other_job.delete()
+        url = reverse("company_detail", args=[self.profile_b.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["open_jobs_count"], 0)
+        content = response.content.decode()
+        self.assertIn("Beta Corp", content)
+        self.assertIn("Active Job Vacancies (0)", content)
+        self.assertIn(
+            "There are currently no active job vacancies listed for this company. Please check back later.",
+            content,
+        )
+
+    def test_navigation_link_on_job_detail_points_to_company(self):
+        url = reverse("job_detail", args=[self.open_job_1.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        company_url = reverse("company_detail", args=[self.profile_a.pk])
+        self.assertIn(company_url, content)
+
+    def test_company_vacancy_links_to_correct_job_detail(self):
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        job1_url = reverse("job_detail", args=[self.open_job_1.pk])
+        job2_url = reverse("job_detail", args=[self.open_job_2.pk])
+        self.assertIn(job1_url, content)
+        self.assertIn(job2_url, content)
+
+    def test_pagination_with_multiple_pages(self):
+        # Create 12 more open jobs for Company A (total = 14)
+        for i in range(12):
+            Job.objects.create(
+                employer=self.profile_a,
+                title=f"Extra Job {i+1}",
+                description=f"Description {i+1}",
+                category=self.category,
+                location=self.location,
+                status=Job.Status.PUBLISHED,
+                application_deadline=timezone.localdate() + timedelta(days=15),
+            )
+
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["open_jobs_count"], 14)
+        self.assertEqual(len(response.context["jobs"]), 10)
+        self.assertTrue(response.context["page_obj"].has_next())
+
+        content = response.content.decode()
+        self.assertIn("?page=2", content)
+
+        # Page 2
+        response2 = self.client.get(f"{url}?page=2")
+        self.assertEqual(response2.status_code, 200)
+        self.assertEqual(len(response2.context["jobs"]), 4)
+        self.assertTrue(response2.context["page_obj"].has_previous())
+        content2 = response2.content.decode()
+        self.assertIn("?page=1", content2)
+
+    def test_saved_jobs_integration_for_jobseeker(self):
+        from jobs.models import SavedJob
+        # cand1 saves open_job_1
+        SavedJob.objects.create(jobseeker=self.cand1.jobseeker_profile, job=self.open_job_1)
+
+        self.client.force_login(self.cand1)
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.open_job_1.pk, response.context["saved_job_ids"])
+        self.assertNotIn(self.open_job_2.pk, response.context["saved_job_ids"])
+
+        content = response.content.decode()
+        save_toggle_url = reverse("toggle_save_job", args=[self.open_job_1.pk])
+        self.assertIn(save_toggle_url, content)
+        self.assertIn("Saved", content)
+        self.assertIn("Save", content)
+
+    def test_saved_jobs_isolation_between_candidates(self):
+        from jobs.models import SavedJob
+        # cand1 saves open_job_1
+        SavedJob.objects.create(jobseeker=self.cand1.jobseeker_profile, job=self.open_job_1)
+
+        # cand2 logs in
+        self.client.force_login(self.cand2)
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["saved_job_ids"]), 0)
+        self.assertNotIn(self.open_job_1.pk, response.context["saved_job_ids"])
+
+    def test_anonymous_user_sees_login_link_for_save(self):
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["saved_job_ids"]), 0)
+        content = response.content.decode()
+        self.assertIn(reverse("login"), content)
+        self.assertNotIn('action="' + reverse("toggle_save_job", args=[self.open_job_1.pk]) + '"', content)
+
+    def test_employer_does_not_see_candidate_save_buttons(self):
+        self.client.force_login(self.emp_b_user)
+        url = reverse("company_detail", args=[self.profile_a.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["saved_job_ids"]), 0)
+        content = response.content.decode()
+        self.assertNotIn('action="' + reverse("toggle_save_job", args=[self.open_job_1.pk]) + '"', content)
+
+    def test_bounded_query_count_on_company_detail(self):
+        from jobs.models import SavedJob
+        # Create 10 open jobs
+        for i in range(8):
+            Job.objects.create(
+                employer=self.profile_a,
+                title=f"Query Bound Job {i+1}",
+                description="Desc",
+                category=self.category,
+                location=self.location,
+                status=Job.Status.PUBLISHED,
+                application_deadline=timezone.localdate() + timedelta(days=15),
+            )
+        SavedJob.objects.create(jobseeker=self.cand1.jobseeker_profile, job=self.open_job_1)
+
+        self.client.force_login(self.cand1)
+        url = reverse("company_detail", args=[self.profile_a.pk])
+
+        # Under authenticated jobseeker, query count is bounded and constant O(1):
+        # 1: EmployerProfile lookup
+        # 2: Job count query for paginator
+        # 3: Session lookup (session middleware)
+        # 4: User lookup (auth middleware)
+        # 5: JobseekerProfile lookup (for saved_jobs query)
+        # 6: 10 Jobs page slice with select_related category & location
+        # 7: Batched SavedJob lookup with job_id IN (...)
+        # 8: Unread notifications count in navbar context processor
+        with self.assertNumQueries(8):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(response.context["jobs"]), 10)
+
+

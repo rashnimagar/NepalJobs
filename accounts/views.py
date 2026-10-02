@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -268,11 +269,33 @@ def company_detail(request, pk):
         pk=pk,
         verification_status=EmployerProfile.VerificationStatus.APPROVED,
     )
+    open_jobs_qs = (
+        company.jobs.open_jobs()
+        .select_related("category", "location")
+        .order_by("-created_at")
+    )
+    paginator = Paginator(open_jobs_qs, 10)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    saved_job_ids = set()
+    if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
+        profile = getattr(request.user, "jobseeker_profile", None)
+        if profile:
+            page_job_ids = [j.pk for j in page_obj.object_list]
+            saved_job_ids = set(
+                profile.saved_jobs.filter(job_id__in=page_job_ids).values_list("job_id", flat=True)
+            )
+
     return render(
         request,
         "accounts/company_detail.html",
         {
             "company": company,
+            "page_obj": page_obj,
+            "jobs": page_obj.object_list,
+            "open_jobs_count": paginator.count,
+            "saved_job_ids": saved_job_ids,
         },
     )
 
