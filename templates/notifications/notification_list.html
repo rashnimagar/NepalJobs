@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications — NepalJobs{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-9 col-md-11">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+      <div>
+        <h2 class="fw-bold mb-1">Notifications</h2>
+        <p class="text-muted mb-0">Stay updated on your job applications, interviews, and recruitment activity.</p>
+      </div>
+      {% if unread_notifications_count > 0 %}
+        <form method="post" action="{% url 'notification_mark_all_read' %}" class="m-0">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline-secondary btn-sm">
+            Mark all as read
+          </button>
+        </form>
+      {% endif %}
+    </div>
+
+    {% if notifications %}
+      <div class="list-group shadow-sm mb-4">
+        {% for notification in notifications %}
+          <a href="{% url 'notification_read_and_redirect' notification.pk %}"
+             class="list-group-item list-group-item-action p-3 text-decoration-none {% if not notification.is_read %}border-start border-primary border-4 bg-light{% endif %}">
+            <div class="d-flex w-100 justify-content-between align-items-start mb-1 flex-wrap gap-1">
+              <h5 class="mb-1 {% if not notification.is_read %}fw-bold text-dark{% else %}text-secondary{% endif %}">
+                {{ notification.title }}
+                {% if not notification.is_read %}
+                  <span class="badge bg-primary ms-1">New</span>
+                {% endif %}
+              </h5>
+              <small class="text-muted" title="{{ notification.created_at }}">
+                {{ notification.created_at|timesince }} ago
+              </small>
+            </div>
+            <p class="mb-2 text-dark">{{ notification.message }}</p>
+            <div class="d-flex justify-content-between align-items-center">
+              <small class="text-primary fw-medium">View details &rarr;</small>
+              <small class="text-muted">
+                {% if notification.is_read %}
+                  <span class="text-secondary">&check; Read</span>
+                {% else %}
+                  <span class="text-primary fw-semibold">Unread</span>
+                {% endif %}
+              </small>
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+
+      <!-- Pagination -->
+      {% if page_obj.has_other_pages %}
+        <nav aria-label="Notifications pagination" class="d-flex justify-content-center">
+          <ul class="pagination">
+            {% if page_obj.has_previous %}
+              <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+              </li>
+            {% else %}
+              <li class="page-item disabled"><span class="page-link">Previous</span></li>
+            {% endif %}
+
+            <li class="page-item disabled">
+              <span class="page-link text-dark">
+                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+              </span>
+            </li>
+
+            {% if page_obj.has_next %}
+              <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+              </li>
+            {% else %}
+              <li class="page-item disabled"><span class="page-link">Next</span></li>
+            {% endif %}
+          </ul>
+        </nav>
+      {% endif %}
+
+    {% else %}
+      <div class="card shadow-sm text-center py-5">
+        <div class="card-body">
+          <h4 class="text-muted fw-normal mb-2">No notifications yet</h4>
+          <p class="text-muted mb-0">You're all caught up! New updates on applications and interviews will appear here.</p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

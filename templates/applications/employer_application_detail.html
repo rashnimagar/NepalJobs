@@ -226,13 +226,46 @@
               </div>
             {% endif %}
 
-            <div class="d-flex gap-2 mt-3 pt-2 border-top">
-              <a href="{% url 'employer_edit_interview' active_interview.pk %}" class="btn btn-outline-primary btn-sm flex-grow-1">
+            <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
+              <button type="button" class="btn btn-success btn-sm flex-grow-1 fw-semibold" data-bs-toggle="modal" data-bs-target="#completeInterviewModal">
+                &#10003; Mark Completed
+              </button>
+              <a href="{% url 'employer_edit_interview' active_interview.pk %}" class="btn btn-outline-primary btn-sm">
                 Reschedule / Edit
               </a>
               <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#cancelInterviewModal">
                 Cancel
               </button>
+            </div>
+          </div>
+
+          {# Complete Confirmation Modal #}
+          <div class="modal fade" id="completeInterviewModal" tabindex="-1" aria-labelledby="completeInterviewModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <form method="post" action="{% url 'employer_complete_interview' active_interview.pk %}">
+                  {% csrf_token %}
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="completeInterviewModalLabel">Mark Interview as Completed</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <p class="text-secondary small mb-3">
+                      Complete the interview scheduled for <strong>{{ active_interview.scheduled_at|date:"M d, Y at h:i A" }}</strong>.
+                      This will change the interview status to <strong>Completed</strong>. The application stage will remain unchanged.
+                    </p>
+                    <div class="mb-3">
+                      <label for="id_outcome_notes" class="form-label fw-semibold small">Outcome Notes (Optional)</label>
+                      <textarea name="outcome_notes" id="id_outcome_notes" class="form-control form-control-sm" rows="3" placeholder="Add confidential assessment, candidate strengths, ratings, or next steps (private to employer)..."></textarea>
+                      <div class="form-text text-muted" style="font-size: 0.75rem;">These notes are internal and will never be shown to the candidate.</div>
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success btn-sm fw-semibold">Confirm Completion</button>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
 
@@ -285,12 +318,12 @@
         {# Historical Interviews #}
         {% if historical_interviews %}
           <div class="mt-3 pt-3 border-top">
-            <div class="text-muted small fw-semibold mb-2">Past / Cancelled ({{ historical_interviews.count }})</div>
+            <div class="text-muted small fw-semibold mb-2">Past / Historical ({{ historical_interviews.count }})</div>
             <div class="d-flex flex-column gap-2">
               {% for h_int in historical_interviews %}
                 <div class="p-2 bg-light rounded border small">
                   <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="badge {% if h_int.status == 'cancelled' %}bg-danger-subtle text-danger border border-danger-subtle{% else %}bg-secondary{% endif %}" style="font-size: 0.7rem;">
+                    <span class="badge {% if h_int.status == 'cancelled' %}bg-danger-subtle text-danger border border-danger-subtle{% elif h_int.status == 'completed' %}bg-success-subtle text-success border border-success-subtle{% else %}bg-secondary{% endif %}" style="font-size: 0.7rem;">
                       {{ h_int.get_status_display }}
                     </span>
                     <span class="text-muted" style="font-size: 0.75rem;">
@@ -300,7 +333,7 @@
                   <div class="text-dark small">{{ h_int.get_interview_type_display }} &bull; {{ h_int.duration_minutes }}m</div>
                   {% if h_int.internal_notes %}
                     <div class="text-muted small fst-italic mt-1" style="font-size: 0.75rem;">
-                      "{{ h_int.internal_notes|truncatechars:60 }}"
+                      "{{ h_int.internal_notes|truncatechars:80 }}"
                     </div>
                   {% endif %}
                 </div>

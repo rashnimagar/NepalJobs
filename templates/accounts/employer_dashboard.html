@@ -11,6 +11,7 @@
   <div class="d-flex gap-2 flex-wrap">
     {% if is_approved %}
       <a class="btn btn-outline-success btn-sm" href="{% url 'employer_job_list' %}">My Jobs ({{ jobs_count }})</a>
+      <a class="btn btn-outline-primary btn-sm" href="{% url 'employer_all_applicants' %}">All Applicants ({{ total_applicants }})</a>
       <a class="btn btn-success btn-sm" href="{% url 'employer_job_create' %}">Post a Job</a>
     {% endif %}
     <a class="btn btn-outline-primary btn-sm" href="{% url 'employer_profile' %}">View Profile</a>
@@ -33,6 +34,76 @@
       </div>
       <div class="d-flex gap-2">
         <a class="btn btn-success btn-sm text-nowrap" href="{% url 'company_detail' profile.pk %}">View Public Profile</a>
+      </div>
+    </div>
+  </div>
+
+  {# Recruitment Pipeline Metrics #}
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card shadow-sm border-0 h-100 border-start border-3 border-success">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Active Jobs</div>
+          <div class="fs-3 fw-bold text-dark">{{ active_jobs_count }}</div>
+          <a href="{% url 'employer_job_list' %}" class="small text-decoration-none text-muted">
+            Manage &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card shadow-sm border-0 h-100 border-start border-3 border-secondary">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Total Applicants</div>
+          <div class="fs-3 fw-bold text-dark">{{ total_applicants }}</div>
+          <a href="{% url 'employer_all_applicants' %}" class="small text-decoration-none text-muted">
+            Directory &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card shadow-sm border-0 h-100 border-start border-3 border-primary">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Needs Review</div>
+          <div class="fs-3 fw-bold text-primary">{{ needs_review_count }}</div>
+          <a href="{% url 'employer_all_applicants' %}?status=applied" class="small text-decoration-none text-primary">
+            Applied &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card shadow-sm border-0 h-100 border-start border-3 border-warning">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Screening</div>
+          <div class="fs-3 fw-bold text-warning-emphasis">{{ screening_count }}</div>
+          <a href="{% url 'employer_all_applicants' %}?status=shortlisted" class="small text-decoration-none text-muted">
+            Shortlist &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card shadow-sm border-0 h-100 border-start border-3 border-info">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Interviews</div>
+          <div class="fs-3 fw-bold text-info">{{ interview_count }}</div>
+          <a href="{% url 'employer_all_applicants' %}?status=interview" class="small text-decoration-none text-info">
+            In stage &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card shadow-sm border-0 h-100 border-start border-3 border-success">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Hired</div>
+          <div class="fs-3 fw-bold text-success">{{ hired_count }}</div>
+          <a href="{% url 'employer_all_applicants' %}?status=selected" class="small text-decoration-none text-success">
+            Selected &rarr;
+          </a>
+        </div>
       </div>
     </div>
   </div>
@@ -83,8 +154,166 @@
 {% endif %}
 
 <div class="row g-4">
-  {# Left Column: Company Overview #}
+  {# Left Column: Operations & Company Overview #}
   <div class="col-lg-8">
+    {% if is_approved %}
+      {# Upcoming Interviews Widget #}
+      <div class="card shadow-sm border-0 mb-4 border-start border-4 border-primary">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0 fw-bold">Upcoming Interviews</h5>
+              {% if upcoming_interviews %}
+                <span class="badge bg-primary">{{ upcoming_interviews|length }} scheduled</span>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if upcoming_interviews %}
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th scope="col">Candidate</th>
+                    <th scope="col">Job Position</th>
+                    <th scope="col">Date & Time</th>
+                    <th scope="col">Type / Location</th>
+                    <th scope="col" class="text-end">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for interview in upcoming_interviews %}
+                    <tr>
+                      <td>
+                        <a href="{% url 'employer_application_detail' interview.application.pk %}" class="fw-semibold text-decoration-none text-dark">
+                          {{ interview.application.jobseeker.user.get_full_name|default:interview.application.jobseeker.user.username }}
+                        </a>
+                      </td>
+                      <td>
+                        <span class="text-dark small fw-medium">{{ interview.application.job.title }}</span>
+                      </td>
+                      <td>
+                        <div class="fw-semibold small text-dark">&#128197; {{ interview.scheduled_at|date:"M d, Y" }}</div>
+                        <div class="text-muted small">&#128337; {{ interview.scheduled_at|date:"h:i A" }}</div>
+                      </td>
+                      <td>
+                        <div>
+                          <span class="badge bg-primary-subtle text-primary border border-primary-subtle mb-1">
+                            {{ interview.get_interview_type_display }}
+                          </span>
+                        </div>
+                        {% if "http://" in interview.location_or_link or "https://" in interview.location_or_link %}
+                          <a href="{{ interview.location_or_link }}" target="_blank" rel="noopener noreferrer" class="small text-break">
+                            {{ interview.location_or_link|truncatechars:30 }}
+                          </a>
+                        {% elif interview.location_or_link %}
+                          <span class="text-secondary small">{{ interview.location_or_link|truncatechars:30 }}</span>
+                        {% endif %}
+                      </td>
+                      <td class="text-end">
+                        <a href="{% url 'employer_application_detail' interview.application.pk %}" class="btn btn-sm btn-outline-primary">
+                          Review
+                        </a>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="text-center py-4">
+              <div class="text-muted mb-2 fs-2">&#128197;</div>
+              <p class="text-muted small mb-0">
+                No upcoming interviews scheduled. Schedule interviews with shortlisted candidates from their application review pages.
+              </p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {# Recent Applicants Widget #}
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0 fw-bold">Recent Applicants</h5>
+              {% if total_applicants > 0 %}
+                <span class="badge bg-secondary">{{ total_applicants }} total</span>
+              {% endif %}
+            </div>
+            {% if total_applicants > 0 %}
+              <a href="{% url 'employer_all_applicants' %}" class="small text-decoration-none fw-semibold">
+                View All Applicants &rarr;
+              </a>
+            {% endif %}
+          </div>
+
+          {% if recent_applicants %}
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th scope="col">Candidate</th>
+                    <th scope="col">Job Position</th>
+                    <th scope="col">Applied Date</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="text-end">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for app in recent_applicants %}
+                    <tr>
+                      <td>
+                        <a href="{% url 'employer_application_detail' app.pk %}" class="fw-semibold text-decoration-none text-dark">
+                          {{ app.jobseeker.user.get_full_name|default:app.jobseeker.user.username }}
+                        </a>
+                        <div class="text-muted small">{{ app.jobseeker.user.email }}</div>
+                      </td>
+                      <td>
+                        <span class="text-dark small fw-medium">{{ app.job.title }}</span>
+                      </td>
+                      <td class="text-muted small">
+                        {{ app.created_at|date:"M d, Y" }}
+                      </td>
+                      <td>
+                        {% if app.status == 'applied' %}
+                          <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
+                        {% elif app.status == 'under_review' %}
+                          <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
+                        {% elif app.status == 'shortlisted' %}
+                          <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
+                        {% elif app.status == 'interview' %}
+                          <span class="badge bg-primary text-white">Interview</span>
+                        {% elif app.status == 'selected' %}
+                          <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
+                        {% elif app.status == 'rejected' %}
+                          <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
+                        {% else %}
+                          <span class="badge bg-secondary">{{ app.get_status_display }}</span>
+                        {% endif %}
+                      </td>
+                      <td class="text-end">
+                        <a href="{% url 'employer_application_detail' app.pk %}" class="btn btn-sm btn-primary">
+                          Review
+                        </a>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="text-center py-4">
+              <div class="text-muted mb-2 fs-2">&#128101;</div>
+              <p class="text-muted small mb-0">
+                No applications received yet. Qualified candidates will appear here as they apply to your open positions.
+              </p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
     <div class="card mb-4">
       <div class="card-body p-4">
         <div class="d-flex align-items-center gap-3 mb-4">
@@ -201,13 +430,14 @@
 
     <div class="card">
       <div class="card-body p-4">
-        <h5 class="mb-3">Quick Links</h5>
+        <h5 class="mb-3">Quick Actions</h5>
         <div class="d-grid gap-2">
           {% if is_approved %}
             <a class="btn btn-primary" href="{% url 'employer_job_create' %}">Post a Job</a>
             <a class="btn btn-outline-success" href="{% url 'employer_job_list' %}">Manage Jobs ({{ jobs_count }})</a>
+            <a class="btn btn-outline-primary" href="{% url 'employer_all_applicants' %}">View All Applicants ({{ total_applicants }})</a>
           {% endif %}
-          <a class="btn btn-outline-primary" href="{% url 'employer_profile' %}">View Full Profile</a>
+          <a class="btn btn-outline-secondary" href="{% url 'employer_profile' %}">View Full Profile</a>
           <a class="btn btn-outline-secondary" href="{% url 'employer_profile_edit' %}">Edit Company Details</a>
           {% if is_approved %}
             <a class="btn btn-outline-success" href="{% url 'company_detail' profile.pk %}">Public Company Page</a>

@@ -27,6 +27,7 @@ from applications.admin import (
 )
 from applications.forms import (
     ApplicationStatusUpdateForm,
+    InterviewCompleteForm,
     InterviewScheduleForm,
     JobApplicationForm,
 )
@@ -2225,3 +2226,335 @@ class InterviewAdminTests(TestCase):
         self.assertIn("status", model_admin.list_filter)
         self.assertIn("created_at", model_admin.readonly_fields)
         self.assertIn("application", model_admin.raw_id_fields)
+
+
+# ===========================================================================
+# Step 6.11 — Interview Completion & All Applicants Tests
+# ===========================================================================
+
+class Step611InterviewCompletionModelTests(TestCase):
+    def setUp(self):
+        self.employer_user = make_employer(username="comp_emp", email="comp_emp@example.com")
+        self.candidate_user = make_jobseeker(username="comp_cand", email="comp_cand@example.com")
+        self.job = create_job(self.employer_user.employer_profile, title="Backend Developer")
+        self.application = Application.objects.create(
+            job=self.job,
+            jobseeker=self.candidate_user.jobseeker_profile,
+            status=Application.Status.INTERVIEW,
+        )
+        self.interview = Interview.objects.create(
+            application=self.application,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.IN_PERSON,
+            scheduled_at=timezone.now() + timedelta(days=2),
+            duration_minutes=45,
+            location_or_link="https://meet.google.com/test",
+            candidate_instructions="Prepare for coding test",
+            internal_notes="Existing notes about candidate background.",
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+
+    def test_complete_scheduled_interview(self):
+        self.interview.complete(outcome_notes="Candidate did great in algorithms.")
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.COMPLETED)
+        self.assertTrue(self.interview.is_completed)
+        self.assertFalse(self.interview.is_scheduled)
+
+    def test_complete_stores_outcome_notes_and_preserves_internal_notes(self):
+        self.interview.complete(outcome_notes="Strong performance. Offer recommended.")
+        self.interview.refresh_from_db()
+        self.assertIn("Existing notes about candidate background.", self.interview.internal_notes)
+        self.assertIn("[Outcome]: Strong performance. Offer recommended.", self.interview.internal_notes)
+
+    def test_complete_with_empty_outcome_notes_preserves_internal_notes(self):
+        self.interview.complete(outcome_notes="")
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.internal_notes, "Existing notes about candidate background.")
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.COMPLETED)
+
+    def test_complete_stores_outcome_notes_when_internal_notes_originally_empty(self):
+        self.interview.internal_notes = ""
+        self.interview.save()
+        self.interview.complete(outcome_notes="Solo outcome note.")
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.internal_notes, "[Outcome]: Solo outcome note.")
+
+    def test_complete_already_completed_raises_validation_error(self):
+        self.interview.complete(outcome_notes="First completion.")
+        with self.assertRaises(ValidationError) as ctx:
+            self.interview.complete(outcome_notes="Second completion.")
+        self.assertIn("scheduled interviews can be marked as completed", str(ctx.exception))
+
+    def test_complete_cancelled_raises_validation_error(self):
+        self.interview.cancel()
+        with self.assertRaises(ValidationError) as ctx:
+            self.interview.complete(outcome_notes="Cannot complete cancelled.")
+        self.assertIn("scheduled interviews can be marked as completed", str(ctx.exception))
+
+    def test_complete_does_not_modify_application_status(self):
+        initial_status = self.application.status
+        self.interview.complete(outcome_notes="Completed notes.")
+        self.application.refresh_from_db()
+        self.assertEqual(self.application.status, initial_status)
+        self.assertEqual(self.application.status, Application.Status.INTERVIEW)
+
+    def test_outcome_notes_isolated_to_internal_notes_field(self):
+        self.interview.complete(outcome_notes="Confidential: Candidate failed system design.")
+        self.interview.refresh_from_db()
+        self.assertIn("Confidential", self.interview.internal_notes)
+        self.assertNotIn("Confidential", self.interview.candidate_instructions)
+
+
+class Step611InterviewCompletionViewTests(TestCase):
+    def setUp(self):
+        self.employer_user = make_employer(username="view_emp_a", email="view_emp_a@example.com")
+        self.employer_b_user = make_employer(username="view_emp_b", email="view_emp_b@example.com")
+        self.candidate_user = make_jobseeker(username="view_cand", email="view_cand@example.com")
+        self.job = create_job(self.employer_user.employer_profile, title="Python Lead")
+        self.application = Application.objects.create(
+            job=self.job,
+            jobseeker=self.candidate_user.jobseeker_profile,
+            status=Application.Status.INTERVIEW,
+        )
+        self.interview = Interview.objects.create(
+            application=self.application,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.VIDEO,
+            scheduled_at=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            location_or_link="https://meet.google.com/complete-view-test",
+            candidate_instructions="Initial instructions",
+            internal_notes="Original recruiter notes.",
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+        self.complete_url = reverse("employer_complete_interview", kwargs={"pk": self.interview.pk})
+        self.detail_url = reverse("employer_application_detail", kwargs={"pk": self.application.pk})
+
+    def test_approved_employer_can_complete_interview_with_notes(self):
+        self.client.force_login(self.employer_user)
+        response = self.client.post(self.complete_url, {"outcome_notes": "Passed round with flying colors."})
+        self.assertRedirects(response, self.detail_url)
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.COMPLETED)
+        self.assertIn("Passed round with flying colors.", self.interview.internal_notes)
+        self.assertIn("Original recruiter notes.", self.interview.internal_notes)
+
+    def test_approved_employer_can_complete_interview_without_notes(self):
+        self.client.force_login(self.employer_user)
+        response = self.client.post(self.complete_url, {"outcome_notes": ""})
+        self.assertRedirects(response, self.detail_url)
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.COMPLETED)
+        self.assertEqual(self.interview.internal_notes, "Original recruiter notes.")
+
+    def test_get_request_does_not_mutate_interview(self):
+        self.client.force_login(self.employer_user)
+        response = self.client.get(self.complete_url)
+        self.assertEqual(response.status_code, 405)  # require_POST
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.SCHEDULED)
+
+    def test_cross_employer_cannot_complete_interview(self):
+        self.client.force_login(self.employer_b_user)
+        response = self.client.post(self.complete_url, {"outcome_notes": "Unauthorized note."})
+        self.assertEqual(response.status_code, 404)
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.SCHEDULED)
+
+    def test_candidate_cannot_complete_interview(self):
+        self.client.force_login(self.candidate_user)
+        response = self.client.post(self.complete_url, {"outcome_notes": "Candidate hacked."})
+        self.assertEqual(response.status_code, 403)
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.SCHEDULED)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.post(self.complete_url, {"outcome_notes": "Anonymous"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
+
+    def test_unapproved_employer_blocked(self):
+        pending_emp = make_employer(
+            username="pending_complete_emp",
+            email="pending_comp@example.com",
+            verification_status=EmployerProfile.VerificationStatus.PENDING,
+        )
+        self.client.force_login(pending_emp)
+        response = self.client.post(self.complete_url, {"outcome_notes": "Pending"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_cannot_complete_already_completed_interview(self):
+        self.interview.complete(outcome_notes="First.")
+        self.client.force_login(self.employer_user)
+        response = self.client.post(self.complete_url, {"outcome_notes": "Second attempt."})
+        self.assertRedirects(response, self.detail_url)
+        self.interview.refresh_from_db()
+        self.assertNotIn("Second attempt.", self.interview.internal_notes)
+
+    def test_cannot_complete_cancelled_interview(self):
+        self.interview.cancel()
+        self.client.force_login(self.employer_user)
+        response = self.client.post(self.complete_url, {"outcome_notes": "Should fail."})
+        self.assertRedirects(response, self.detail_url)
+        self.interview.refresh_from_db()
+        self.assertEqual(self.interview.status, Interview.InterviewStatus.CANCELLED)
+        self.assertNotIn("Should fail.", self.interview.internal_notes)
+
+    def test_candidate_detail_view_does_not_leak_outcome_notes(self):
+        self.interview.complete(outcome_notes="Secret employer rating: 2/10")
+        cand_url = reverse("jobseeker_application_detail", kwargs={"pk": self.application.pk})
+        self.client.force_login(self.candidate_user)
+        response = self.client.get(cand_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertNotIn("Secret employer rating", content)
+        self.assertNotIn("2/10", content)
+
+    def test_employer_application_detail_renders_complete_button_for_scheduled(self):
+        self.client.force_login(self.employer_user)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Mark Completed", content)
+        self.assertIn("completeInterviewModal", content)
+
+    def test_employer_application_detail_renders_completed_state_in_history(self):
+        self.interview.complete(outcome_notes="All clear.")
+        self.client.force_login(self.employer_user)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertNotIn("id=\"completeInterviewModal\"", content)
+        self.assertIn("Completed", content)
+
+
+class Step611EmployerAllApplicantsViewTests(TestCase):
+    def setUp(self):
+        self.employer_a_user = make_employer(username="all_emp_a", email="all_emp_a@example.com")
+        self.employer_b_user = make_employer(username="all_emp_b", email="all_emp_b@example.com")
+        self.profile_a = self.employer_a_user.employer_profile
+        self.profile_b = self.employer_b_user.employer_profile
+
+        self.job_a1 = create_job(self.profile_a, title="Frontend Dev")
+        self.job_a2 = create_job(self.profile_a, title="Backend Dev")
+        self.job_b = create_job(self.profile_b, title="Marketing Manager")
+
+        self.cand1 = make_jobseeker(username="all_cand1", email="cand1@example.com")
+        self.cand2 = make_jobseeker(username="all_cand2", email="cand2@example.com")
+        self.cand3 = make_jobseeker(username="all_cand3", email="cand3@example.com")
+
+        self.app_a1 = Application.objects.create(
+            job=self.job_a1,
+            jobseeker=self.cand1.jobseeker_profile,
+            status=Application.Status.APPLIED,
+        )
+        self.app_a2 = Application.objects.create(
+            job=self.job_a2,
+            jobseeker=self.cand2.jobseeker_profile,
+            status=Application.Status.SHORTLISTED,
+        )
+        self.app_b = Application.objects.create(
+            job=self.job_b,
+            jobseeker=self.cand3.jobseeker_profile,
+            status=Application.Status.APPLIED,
+        )
+        self.url = reverse("employer_all_applicants")
+
+    def test_approved_employer_can_view_all_applicants(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "applications/employer_all_applicants.html")
+        applicants = list(response.context["applicants"])
+        self.assertIn(self.app_a1, applicants)
+        self.assertIn(self.app_a2, applicants)
+        self.assertNotIn(self.app_b, applicants)
+
+    def test_employer_isolation(self):
+        self.client.force_login(self.employer_b_user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        applicants = list(response.context["applicants"])
+        self.assertEqual(len(applicants), 1)
+        self.assertIn(self.app_b, applicants)
+        self.assertNotIn(self.app_a1, applicants)
+
+    def test_filter_by_job(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url, {"job": self.job_a1.pk})
+        self.assertEqual(response.status_code, 200)
+        applicants = list(response.context["applicants"])
+        self.assertIn(self.app_a1, applicants)
+        self.assertNotIn(self.app_a2, applicants)
+
+    def test_filter_by_status(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url, {"status": "shortlisted"})
+        self.assertEqual(response.status_code, 200)
+        applicants = list(response.context["applicants"])
+        self.assertIn(self.app_a2, applicants)
+        self.assertNotIn(self.app_a1, applicants)
+
+    def test_search_by_candidate_name(self):
+        self.cand1.first_name = "Subash"
+        self.cand1.last_name = "Thapa"
+        self.cand1.save()
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url, {"q": "Subash"})
+        self.assertEqual(response.status_code, 200)
+        applicants = list(response.context["applicants"])
+        self.assertIn(self.app_a1, applicants)
+        self.assertNotIn(self.app_a2, applicants)
+
+    def test_search_by_candidate_email(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url, {"q": "cand2@example.com"})
+        self.assertEqual(response.status_code, 200)
+        applicants = list(response.context["applicants"])
+        self.assertIn(self.app_a2, applicants)
+        self.assertNotIn(self.app_a1, applicants)
+
+    def test_pagination_and_query_preservation(self):
+        # Create 16 applications to trigger pagination (PAGE_SIZE = 15)
+        for i in range(16):
+            cand = make_jobseeker(username=f"page_cand_{i}", email=f"page_cand_{i}@example.com")
+            Application.objects.create(
+                job=self.job_a1,
+                jobseeker=cand.jobseeker_profile,
+                status=Application.Status.APPLIED,
+            )
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url, {"job": self.job_a1.pk, "page": 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["page_obj"].has_previous())
+        self.assertIn(f"job={self.job_a1.pk}", response.context["query_string"])
+
+    def test_candidate_cannot_access_all_applicants(self):
+        self.client.force_login(self.cand1)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_redirected_to_login(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
+
+    def test_unapproved_employer_blocked(self):
+        pending_emp = make_employer(
+            username="pending_all_emp",
+            email="pending_all@example.com",
+            verification_status=EmployerProfile.VerificationStatus.PENDING,
+        )
+        self.client.force_login(pending_emp)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_all_applicants_status_counts(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url)
+        counts = response.context["status_counts"]
+        self.assertEqual(counts["total"], 2)
+        self.assertEqual(counts["applied"], 1)
+        self.assertEqual(counts["shortlisted"], 1)
+        self.assertEqual(counts["interview"], 0)

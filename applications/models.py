@@ -261,3 +261,17 @@ class Interview(models.Model):
             raise ValidationError("Only active scheduled interviews can be cancelled.")
         self.status = self.InterviewStatus.CANCELLED
         self.save(update_fields=["status", "updated_at"])
+
+    def complete(self, outcome_notes=""):
+        if self.status != self.InterviewStatus.SCHEDULED:
+            raise ValidationError("Only active scheduled interviews can be marked as completed.")
+        self.status = self.InterviewStatus.COMPLETED
+        cleaned_notes = str(outcome_notes).strip() if outcome_notes else ""
+        if cleaned_notes:
+            if self.internal_notes:
+                self.internal_notes = f"{self.internal_notes}\n\n[Outcome]: {cleaned_notes}"
+            else:
+                self.internal_notes = f"[Outcome]: {cleaned_notes}"
+            self.save(update_fields=["status", "internal_notes", "updated_at"])
+        else:
+            self.save(update_fields=["status", "updated_at"])

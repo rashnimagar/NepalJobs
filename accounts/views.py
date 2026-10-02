@@ -26,7 +26,10 @@ from .forms import (
 )
 from .models import CV, MAX_ACTIVE_CVS, Education, EmployerProfile, Experience, Skill
 from django.db.models import Count, Q
-from applications.models import Application
+from django.utils import timezone
+
+from applications.models import Application, Interview
+from jobs.models import Job
 
 
 def register_choice(request):
@@ -93,6 +96,17 @@ def jobseeker_dashboard(request):
         .order_by("-created_at")[:5]
     )
 
+    # Upcoming scheduled interviews for candidate
+    upcoming_interviews = (
+        Interview.objects.filter(
+            application__jobseeker=profile,
+            status=Interview.InterviewStatus.SCHEDULED,
+            scheduled_at__gte=timezone.now(),
+        )
+        .select_related("application__job", "application__job__employer", "application__job__location")
+        .order_by("scheduled_at")[:5]
+    )
+
     return render(request, "accounts/jobseeker_dashboard.html", {
         "steps": steps,
         "done": done,
@@ -104,6 +118,7 @@ def jobseeker_dashboard(request):
         "interview_count": app_metrics["interview"],
         "selected_count": app_metrics["selected"],
         "recent_applications": recent_applications,
+        "upcoming_interviews": upcoming_interviews,
     })
 
 
@@ -111,6 +126,44 @@ def jobseeker_dashboard(request):
 @employer_required
 def employer_dashboard(request):
     profile = request.user.employer_profile
+    is_approved = profile.is_approved
+    jobs_count = profile.jobs.count() if is_approved else 0
+    active_jobs_count = profile.jobs.open_jobs().count() if is_approved else 0
+
+    # Pipeline metrics scoped strictly to current employer
+    pipeline_metrics = Application.objects.filter(job__employer=profile).aggregate(
+        total=Count("id"),
+        needs_review=Count("id", filter=Q(status=Application.Status.APPLIED)),
+        screening=Count(
+            "id",
+            filter=Q(status__in=[Application.Status.UNDER_REVIEW, Application.Status.SHORTLISTED]),
+        ),
+        interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
+        hired=Count("id", filter=Q(status=Application.Status.SELECTED)),
+    )
+
+    # Upcoming scheduled interviews (next 5)
+    upcoming_interviews = (
+        Interview.objects.filter(
+            application__job__employer=profile,
+            status=Interview.InterviewStatus.SCHEDULED,
+            scheduled_at__gte=timezone.now(),
+        )
+        .select_related(
+            "application__job",
+            "application__jobseeker__user",
+            "application__jobseeker",
+        )
+        .order_by("scheduled_at")[:5]
+    )
+
+    # Recent applicants across employer's jobs (latest 6)
+    recent_applicants = (
+        Application.objects.filter(job__employer=profile)
+        .select_related("job", "jobseeker__user", "jobseeker")
+        .order_by("-created_at")[:6]
+    )
+
     return render(
         request,
         "accounts/employer_dashboard.html",
@@ -118,13 +171,22 @@ def employer_dashboard(request):
             "profile": profile,
             "employer_profile": profile,
             "verification_status": profile.verification_status,
-            "is_approved": profile.is_approved,
+            "is_approved": is_approved,
             "is_pending": profile.is_pending,
             "is_rejected": profile.is_rejected,
             "rejection_reason": profile.rejection_reason,
             "has_verification_document": bool(profile.verification_document),
-            "can_post_jobs": profile.is_approved,
-            "jobs_count": profile.jobs.count() if profile.is_approved else 0,
+            "can_post_jobs": is_approved,
+            "jobs_count": jobs_count,
+            "active_jobs_count": active_jobs_count,
+            "pipeline_metrics": pipeline_metrics,
+            "total_applicants": pipeline_metrics["total"],
+            "needs_review_count": pipeline_metrics["needs_review"],
+            "screening_count": pipeline_metrics["screening"],
+            "interview_count": pipeline_metrics["interview"],
+            "hired_count": pipeline_metrics["hired"],
+            "upcoming_interviews": upcoming_interviews,
+            "recent_applicants": recent_applicants,
         },
     )
 

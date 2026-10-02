@@ -206,3 +206,17 @@ class InterviewScheduleForm(BootstrapFormMixin, forms.ModelForm):
                 raise forms.ValidationError("Scheduled interview date and time must be in the future.")
 
         return scheduled_at
+
+
+class InterviewCompleteForm(BootstrapFormMixin, forms.Form):
+    outcome_notes = forms.CharField(
+        label="Interview Outcome Notes",
+        required=False,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "Optional internal interview feedback, notes, or hiring recommendation...",
+            }
+        ),
+        help_text="Internal notes are strictly confidential and recorded in the interview history.",
+    )

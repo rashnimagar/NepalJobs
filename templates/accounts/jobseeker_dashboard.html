@@ -63,6 +63,70 @@
 
 <div class="row g-4">
   <div class="col-lg-7">
+    {# Upcoming Interviews Card #}
+    {% if upcoming_interviews %}
+      <div class="card shadow-sm border-0 mb-4 border-start border-4 border-primary">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0 fw-bold">Upcoming Scheduled Interviews</h5>
+              <span class="badge bg-primary">{{ upcoming_interviews|length }}</span>
+            </div>
+          </div>
+          <div class="d-flex flex-column gap-3">
+            {% for interview in upcoming_interviews %}
+              <div class="p-3 bg-light rounded border">
+                <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-2 mb-2">
+                  <div>
+                    <h6 class="mb-1 fw-bold text-dark">
+                      {{ interview.application.job.title }}
+                    </h6>
+                    <div class="text-muted small">
+                      {{ interview.application.job.employer.company_name }}
+                    </div>
+                  </div>
+                  <div class="text-sm-end">
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+                      {{ interview.get_interview_type_display }} &bull; {{ interview.duration_minutes }}m
+                    </span>
+                  </div>
+                </div>
+
+                <div class="small mb-2">
+                  <div class="fw-semibold text-dark">&#128197; {{ interview.scheduled_at|date:"l, F d, Y" }} at {{ interview.scheduled_at|date:"h:i A" }}</div>
+                  {% if interview.location_or_link %}
+                    <div class="mt-1">
+                      <strong class="text-secondary">Location / Link:</strong>
+                      {% if "http://" in interview.location_or_link or "https://" in interview.location_or_link %}
+                        <a href="{{ interview.location_or_link }}" target="_blank" rel="noopener noreferrer" class="text-break">
+                          {{ interview.location_or_link }}
+                        </a>
+                      {% else %}
+                        <span class="text-secondary">{{ interview.location_or_link }}</span>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                </div>
+
+                {% if interview.candidate_instructions %}
+                  <div class="mt-2 p-2 bg-white rounded border small text-secondary">
+                    <div class="text-muted fw-semibold" style="font-size: 0.75rem;">Instructions from Employer:</div>
+                    {{ interview.candidate_instructions|truncatechars:180|linebreaksbr }}
+                  </div>
+                {% endif %}
+
+                <div class="mt-3 pt-2 border-top d-flex justify-content-end">
+                  <a href="{% url 'jobseeker_application_detail' interview.application.pk %}" class="btn btn-sm btn-outline-primary">
+                    View Application Details &rarr;
+                  </a>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
     {# Recent Applications Card #}
     <div class="card shadow-sm border-0 mb-4">
       <div class="card-body p-4">

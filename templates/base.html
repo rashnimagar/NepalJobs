@@ -19,12 +19,26 @@
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
           <li class="nav-item"><a class="nav-link" href="{% url 'job_list' %}">Browse Jobs</a></li>
           {% if user.is_authenticated %}
+            <li class="nav-item">
+              <a class="nav-link position-relative" href="{% url 'notification_list' %}">
+                Notifications
+                {% if unread_notifications_count > 0 %}
+                  <span class="badge bg-danger rounded-pill ms-1">
+                    {{ unread_notifications_count }}
+                  </span>
+                {% endif %}
+              </a>
+            </li>
             <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a></li>
             {% if user.is_jobseeker and not user.is_staff %}
               <li class="nav-item"><a class="nav-link" href="{% url 'profile' %}">My Profile</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'cv_list' %}">My CVs</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'jobseeker_application_list' %}">My Applications</a></li>
             {% elif user.is_employer and not user.is_staff %}
+              {% if user.employer_profile.is_approved %}
+                <li class="nav-item"><a class="nav-link" href="{% url 'employer_job_list' %}">My Jobs</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'employer_all_applicants' %}">Applicants</a></li>
+              {% endif %}
               <li class="nav-item"><a class="nav-link" href="{% url 'employer_profile' %}">Company Profile</a></li>
             {% endif %}
             <li class="nav-item">

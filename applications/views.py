@@ -8,7 +8,19 @@ from django.views.decorators.http import require_POST
 
 from accounts.decorators import approved_employer_required, jobseeker_required
 from jobs.models import Job
-from .forms import ApplicationStatusUpdateForm, InterviewScheduleForm, JobApplicationForm
+from notifications.services import (
+    notify_application_status_changed,
+    notify_application_submitted,
+    notify_interview_cancelled,
+    notify_interview_rescheduled,
+    notify_interview_scheduled,
+)
+from .forms import (
+    ApplicationStatusUpdateForm,
+    InterviewCompleteForm,
+    InterviewScheduleForm,
+    JobApplicationForm,
+)
 from .models import Application, Interview
 
 
@@ -64,6 +76,8 @@ def apply_job(request, job_pk):
                 if existing:
                     return redirect("jobseeker_application_detail", pk=existing.pk)
                 return redirect("job_list")
+
+            notify_application_submitted(application)
 
             messages.success(request, f"Your application for '{job.title}' was submitted successfully.")
             return redirect("jobseeker_application_detail", pk=application.pk)
@@ -321,7 +335,9 @@ def employer_application_detail(request, pk):
             new_status = form.cleaned_data["status"]
             notes = form.cleaned_data.get("notes", "")
             try:
+                old_status = application.status
                 application.transition_to(new_status, changed_by=request.user, notes=notes)
+                notify_application_status_changed(application, old_status, new_status)
                 messages.success(
                     request,
                     f"Candidate application status updated to '{application.get_status_display()}'.",
@@ -341,6 +357,7 @@ def employer_application_detail(request, pk):
         and application.status in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW)
     )
     schedule_interview_form = InterviewScheduleForm() if can_schedule_interview else None
+    complete_interview_form = InterviewCompleteForm() if active_interview else None
 
     return render(
         request,
@@ -354,6 +371,7 @@ def employer_application_detail(request, pk):
             "historical_interviews": historical_interviews,
             "can_schedule_interview": can_schedule_interview,
             "schedule_interview_form": schedule_interview_form,
+            "complete_interview_form": complete_interview_form,
         },
     )
 
@@ -399,6 +417,8 @@ def employer_schedule_interview(request, pk):
                     interview.full_clean()
                     interview.save()
 
+                notify_interview_scheduled(interview)
+
                 messages.success(
                     request,
                     f"Interview scheduled for {interview.scheduled_at.strftime('%b %d, %Y at %I:%M %p')}.",
@@ -440,6 +460,7 @@ def employer_edit_interview(request, pk):
                 updated_interview = form.save(commit=False)
                 updated_interview.full_clean()
                 updated_interview.save()
+                notify_interview_rescheduled(updated_interview)
                 messages.success(
                     request,
                     f"Interview rescheduled to {updated_interview.scheduled_at.strftime('%b %d, %Y at %I:%M %p')}.",
@@ -477,5 +498,113 @@ def employer_cancel_interview(request, pk):
         return redirect("employer_application_detail", pk=interview.application.pk)
 
     interview.cancel()
+    notify_interview_cancelled(interview)
     messages.success(request, "The interview has been cancelled.")
     return redirect("employer_application_detail", pk=interview.application.pk)
+
+
+@approved_employer_required
+@require_POST
+def employer_complete_interview(request, pk):
+    employer = request.user.employer_profile
+    interview = get_object_or_404(
+        Interview.objects.select_related("application", "application__job"),
+        pk=pk,
+        application__job__employer=employer,
+    )
+
+    if interview.status != Interview.InterviewStatus.SCHEDULED:
+        messages.error(request, "Only active scheduled interviews can be marked as completed.")
+        return redirect("employer_application_detail", pk=interview.application.pk)
+
+    form = InterviewCompleteForm(request.POST)
+    if form.is_valid():
+        outcome_notes = form.cleaned_data.get("outcome_notes", "")
+        try:
+            interview.complete(outcome_notes=outcome_notes)
+            messages.success(request, "The interview has been marked as completed.")
+        except ValidationError as e:
+            messages.error(request, str(e))
+    else:
+        messages.error(request, "Unable to complete interview due to invalid form data.")
+
+    return redirect("employer_application_detail", pk=interview.application.pk)
+
+
+@approved_employer_required
+def employer_all_applicants(request):
+    employer = request.user.employer_profile
+    employer_jobs = employer.jobs.all().order_by("title")
+
+    applicants_qs = (
+        Application.objects.filter(job__employer=employer)
+        .select_related("job", "job__location", "jobseeker__user", "cv")
+        .order_by("-created_at")
+    )
+
+    # Status counts aggregation across all employer applicants
+    status_counts = applicants_qs.aggregate(
+        total=Count("id"),
+        applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
+        under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
+        shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
+        interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
+        selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
+        rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
+    )
+    status_counts["all"] = status_counts["total"]
+
+    # Filter by job
+    selected_job_id = request.GET.get("job", "").strip()
+    if selected_job_id.isdigit():
+        job_pk = int(selected_job_id)
+        if employer_jobs.filter(pk=job_pk).exists():
+            applicants_qs = applicants_qs.filter(job_id=job_pk)
+        else:
+            selected_job_id = ""
+    else:
+        selected_job_id = ""
+
+    # Filter by status
+    current_status = request.GET.get("status", "").strip().lower()
+    if current_status in Application.Status.values:
+        applicants_qs = applicants_qs.filter(status=current_status)
+    else:
+        current_status = "all"
+
+    # Search filter (candidate name, email, or job title)
+    q = request.GET.get("q", "").strip()
+    if q:
+        applicants_qs = applicants_qs.filter(
+            Q(jobseeker__user__first_name__icontains=q)
+            | Q(jobseeker__user__last_name__icontains=q)
+            | Q(jobseeker__user__email__icontains=q)
+            | Q(jobseeker__user__username__icontains=q)
+            | Q(job__title__icontains=q)
+        )
+
+    # Pagination: 15 per page
+    paginator = Paginator(applicants_qs, 15)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    # Query string preservation across pagination
+    query_params = request.GET.copy()
+    if "page" in query_params:
+        del query_params["page"]
+    query_string = query_params.urlencode()
+
+    return render(
+        request,
+        "applications/employer_all_applicants.html",
+        {
+            "page_obj": page_obj,
+            "applicants": page_obj.object_list,
+            "employer_jobs": employer_jobs,
+            "selected_job_id": selected_job_id,
+            "current_status": current_status,
+            "status_counts": status_counts,
+            "q": q,
+            "query_string": query_string,
+        },
+    )

@@ -1501,3 +1501,417 @@ class Step5EmployerTemplateRenderTests(Step5ViewsBaseTestCase):
         content2 = response2.content.decode()
         self.assertIn(self.profile.logo.url, content2)
         self.assertIn("company-logo-hero", content2)
+
+
+# ===========================================================================
+# Step 6.11 — Recruitment Dashboards & Interview Lifecycle Tests
+# ===========================================================================
+
+from datetime import timedelta
+from django.utils import timezone
+from applications.models import Application, Interview
+from jobs.models import Category, Job, Location
+
+
+class Step611EmployerRecruitmentDashboardTests(TestCase):
+    def setUp(self):
+        self.employer_a_user = make_employer(username="dash_emp_a", email="dash_emp_a@example.com")
+        self.employer_b_user = make_employer(username="dash_emp_b", email="dash_emp_b@example.com")
+        self.profile_a = self.employer_a_user.employer_profile
+        self.profile_a.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile_a.save()
+
+        self.profile_b = self.employer_b_user.employer_profile
+        self.profile_b.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.profile_b.save()
+
+        self.category = Category.objects.create(name="IT", slug="it-dash")
+        self.location = Location.objects.create(name="Kathmandu", slug="ktm-dash")
+
+        # Jobs for Employer A (2 published, 1 draft)
+        self.job_a1 = Job.objects.create(
+            employer=self.profile_a,
+            title="Senior Python Dev",
+            description="Desc",
+            category=self.category,
+            location=self.location,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+        )
+        self.job_a2 = Job.objects.create(
+            employer=self.profile_a,
+            title="UI Designer",
+            description="Desc",
+            category=self.category,
+            location=self.location,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+        )
+        self.job_a3 = Job.objects.create(
+            employer=self.profile_a,
+            title="Draft QA Role",
+            description="Desc",
+            category=self.category,
+            location=self.location,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.DRAFT,
+        )
+
+        # Job for Employer B
+        self.job_b = Job.objects.create(
+            employer=self.profile_b,
+            title="Data Scientist",
+            description="Desc",
+            category=self.category,
+            location=self.location,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+        )
+
+        # Create Candidates
+        self.cands = [
+            make_jobseeker(username=f"dash_cand_{i}", email=f"dash_cand_{i}@example.com")
+            for i in range(7)
+        ]
+
+        # Applications for Employer A across stages
+        self.app_applied = Application.objects.create(
+            job=self.job_a1,
+            jobseeker=self.cands[0].jobseeker_profile,
+            status=Application.Status.APPLIED,
+        )
+        self.app_review = Application.objects.create(
+            job=self.job_a1,
+            jobseeker=self.cands[1].jobseeker_profile,
+            status=Application.Status.UNDER_REVIEW,
+        )
+        self.app_shortlisted = Application.objects.create(
+            job=self.job_a2,
+            jobseeker=self.cands[2].jobseeker_profile,
+            status=Application.Status.SHORTLISTED,
+        )
+        self.app_interview = Application.objects.create(
+            job=self.job_a2,
+            jobseeker=self.cands[3].jobseeker_profile,
+            status=Application.Status.INTERVIEW,
+        )
+        self.app_selected = Application.objects.create(
+            job=self.job_a1,
+            jobseeker=self.cands[4].jobseeker_profile,
+            status=Application.Status.SELECTED,
+        )
+        self.app_rejected = Application.objects.create(
+            job=self.job_a2,
+            jobseeker=self.cands[5].jobseeker_profile,
+            status=Application.Status.REJECTED,
+        )
+
+        # Application for Employer B
+        self.app_b = Application.objects.create(
+            job=self.job_b,
+            jobseeker=self.cands[6].jobseeker_profile,
+            status=Application.Status.APPLIED,
+        )
+
+        # Interviews for Employer A
+        self.int_future = Interview.objects.create(
+            application=self.app_interview,
+            created_by=self.employer_a_user,
+            interview_type=Interview.InterviewType.VIDEO,
+            scheduled_at=timezone.now() + timedelta(days=2),
+            duration_minutes=45,
+            location_or_link="https://meet.google.com/upcoming-a",
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+        self.int_past = Interview.objects.create(
+            application=self.app_shortlisted,
+            created_by=self.employer_a_user,
+            interview_type=Interview.InterviewType.IN_PERSON,
+            scheduled_at=timezone.now() - timedelta(days=2),
+            duration_minutes=30,
+            location_or_link="Office KTM",
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+        self.int_cancelled = Interview.objects.create(
+            application=self.app_review,
+            created_by=self.employer_a_user,
+            interview_type=Interview.InterviewType.PHONE,
+            scheduled_at=timezone.now() + timedelta(days=3),
+            duration_minutes=15,
+            status=Interview.InterviewStatus.CANCELLED,
+        )
+        self.int_completed = Interview.objects.create(
+            application=self.app_selected,
+            created_by=self.employer_a_user,
+            interview_type=Interview.InterviewType.IN_PERSON,
+            scheduled_at=timezone.now() - timedelta(days=1),
+            duration_minutes=60,
+            status=Interview.InterviewStatus.COMPLETED,
+        )
+
+        # Interview for Employer B
+        self.int_b = Interview.objects.create(
+            application=self.app_b,
+            created_by=self.employer_b_user,
+            interview_type=Interview.InterviewType.VIDEO,
+            scheduled_at=timezone.now() + timedelta(days=1),
+            duration_minutes=45,
+            location_or_link="https://meet.google.com/upcoming-b",
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+
+        self.dash_url = reverse("employer_dashboard")
+
+    def test_dashboard_active_jobs_count(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["jobs_count"], 3)
+        self.assertEqual(response.context["active_jobs_count"], 2)
+
+    def test_dashboard_active_jobs_excludes_expired_closed_and_draft_jobs(self):
+        user = make_employer(username="active_jobs_emp", email="active_jobs@example.com")
+        profile = user.employer_profile
+        profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        profile.save()
+
+        # 1. Published future deadline (should be counted)
+        Job.objects.create(
+            employer=profile,
+            category=self.category,
+            location=self.location,
+            title="Open Future Job",
+            description="Desc",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+        )
+        # 2. Published expired deadline (must be excluded)
+        Job.objects.create(
+            employer=profile,
+            category=self.category,
+            location=self.location,
+            title="Expired Published Job",
+            description="Desc",
+            application_deadline=timezone.localdate() - timedelta(days=1),
+            status=Job.Status.PUBLISHED,
+        )
+        # 3. Draft job with future deadline (must be excluded)
+        Job.objects.create(
+            employer=profile,
+            category=self.category,
+            location=self.location,
+            title="Draft Job",
+            description="Desc",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.DRAFT,
+        )
+        # 4. Closed job with future deadline (must be excluded)
+        Job.objects.create(
+            employer=profile,
+            category=self.category,
+            location=self.location,
+            title="Closed Job",
+            description="Desc",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.CLOSED,
+        )
+
+        self.client.force_login(user)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["jobs_count"], 4)
+        self.assertEqual(response.context["active_jobs_count"], 1)
+
+    def test_dashboard_pipeline_metrics(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_applicants"], 6)
+        self.assertEqual(response.context["needs_review_count"], 1)  # APPLIED
+        self.assertEqual(response.context["screening_count"], 2)     # UNDER_REVIEW (1) + SHORTLISTED (1)
+        self.assertEqual(response.context["interview_count"], 1)     # INTERVIEW
+        self.assertEqual(response.context["hired_count"], 1)         # SELECTED
+
+    def test_dashboard_employer_isolation(self):
+        self.client.force_login(self.employer_b_user)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["jobs_count"], 1)
+        self.assertEqual(response.context["active_jobs_count"], 1)
+        self.assertEqual(response.context["total_applicants"], 1)
+        self.assertEqual(response.context["needs_review_count"], 1)
+        self.assertEqual(response.context["screening_count"], 0)
+        self.assertEqual(response.context["interview_count"], 0)
+        self.assertEqual(response.context["hired_count"], 0)
+
+    def test_dashboard_upcoming_interviews_filtering(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        upcoming = list(response.context["upcoming_interviews"])
+        # Only future scheduled interview should appear
+        self.assertIn(self.int_future, upcoming)
+        self.assertNotIn(self.int_past, upcoming)
+        self.assertNotIn(self.int_cancelled, upcoming)
+        self.assertNotIn(self.int_completed, upcoming)
+        self.assertNotIn(self.int_b, upcoming)
+
+    def test_dashboard_recent_applicants_ordering_and_isolation(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        recent = list(response.context["recent_applicants"])
+        self.assertEqual(len(recent), 6)
+        # B's applicant is excluded
+        self.assertNotIn(self.app_b, recent)
+        # First item is the most recently created
+        self.assertEqual(recent[0], self.app_rejected)
+
+    def test_dashboard_quick_actions_rendered(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.dash_url)
+        content = response.content.decode()
+        self.assertIn(reverse("employer_job_create"), content)
+        self.assertIn(reverse("employer_job_list"), content)
+        self.assertIn(reverse("employer_all_applicants"), content)
+
+    def test_unapproved_employer_metrics_safe(self):
+        pending_emp = make_employer(
+            username="pending_dash_emp",
+            email="pending_dash@example.com",
+        )
+        self.client.force_login(pending_emp)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["jobs_count"], 0)
+        self.assertEqual(response.context["active_jobs_count"], 0)
+
+
+class Step611CandidateUpcomingInterviewsTests(TestCase):
+    def setUp(self):
+        self.employer_user = make_employer(username="cand_dash_emp", email="cand_dash_emp@example.com")
+        self.employer_user.employer_profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.employer_user.employer_profile.save()
+
+        self.cand1 = make_jobseeker(username="cand_dash_1", email="cand_dash_1@example.com")
+        self.cand2 = make_jobseeker(username="cand_dash_2", email="cand_dash_2@example.com")
+
+        self.category = Category.objects.create(name="Design", slug="design-cand")
+        self.location = Location.objects.create(name="Lalitpur", slug="lalitpur-cand")
+
+        self.job = Job.objects.create(
+            employer=self.employer_user.employer_profile,
+            title="Product Designer",
+            description="Design modern apps",
+            category=self.category,
+            location=self.location,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+        )
+        self.job2 = Job.objects.create(
+            employer=self.employer_user.employer_profile,
+            title="UX Researcher",
+            description="UX Research",
+            category=self.category,
+            location=self.location,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+        )
+
+        self.app1 = Application.objects.create(
+            job=self.job,
+            jobseeker=self.cand1.jobseeker_profile,
+            status=Application.Status.INTERVIEW,
+        )
+        self.app1_second = Application.objects.create(
+            job=self.job2,
+            jobseeker=self.cand1.jobseeker_profile,
+            status=Application.Status.INTERVIEW,
+        )
+        self.app2 = Application.objects.create(
+            job=self.job,
+            jobseeker=self.cand2.jobseeker_profile,
+            status=Application.Status.INTERVIEW,
+        )
+
+        # Cand 1 interviews
+        self.int_future = Interview.objects.create(
+            application=self.app1,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.VIDEO,
+            scheduled_at=timezone.now() + timedelta(days=3),
+            duration_minutes=45,
+            location_or_link="https://meet.google.com/cand1-future",
+            candidate_instructions="Review our design system",
+            internal_notes="Confidential: check portfolio depth",
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+        self.int_past = Interview.objects.create(
+            application=self.app1_second,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.IN_PERSON,
+            scheduled_at=timezone.now() - timedelta(days=2),
+            duration_minutes=30,
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+        self.int_cancelled = Interview.objects.create(
+            application=self.app1,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.PHONE,
+            scheduled_at=timezone.now() + timedelta(days=5),
+            duration_minutes=15,
+            status=Interview.InterviewStatus.CANCELLED,
+        )
+        self.int_completed = Interview.objects.create(
+            application=self.app1,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.IN_PERSON,
+            scheduled_at=timezone.now() - timedelta(days=1),
+            duration_minutes=60,
+            status=Interview.InterviewStatus.COMPLETED,
+        )
+
+        # Cand 2 interview
+        self.int_cand2 = Interview.objects.create(
+            application=self.app2,
+            created_by=self.employer_user,
+            interview_type=Interview.InterviewType.VIDEO,
+            scheduled_at=timezone.now() + timedelta(days=4),
+            duration_minutes=45,
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+
+        self.dash_url = reverse("jobseeker_dashboard")
+
+    def test_candidate_dashboard_shows_upcoming_interviews(self):
+        self.client.force_login(self.cand1)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        upcoming = list(response.context["upcoming_interviews"])
+        self.assertIn(self.int_future, upcoming)
+        self.assertNotIn(self.int_past, upcoming)
+        self.assertNotIn(self.int_cancelled, upcoming)
+        self.assertNotIn(self.int_completed, upcoming)
+        self.assertNotIn(self.int_cand2, upcoming)
+
+        content = response.content.decode()
+        self.assertIn("Upcoming Scheduled Interviews", content)
+        self.assertIn("Product Designer", content)
+        self.assertIn("https://meet.google.com/cand1-future", content)
+        self.assertIn("Review our design system", content)
+        self.assertIn(reverse("jobseeker_application_detail", args=[self.app1.pk]), content)
+
+    def test_candidate_dashboard_does_not_leak_internal_notes(self):
+        self.client.force_login(self.cand1)
+        response = self.client.get(self.dash_url)
+        content = response.content.decode()
+        self.assertNotIn("Confidential: check portfolio depth", content)
+        self.assertNotIn("internal_notes", content)
+
+    def test_candidate_isolation(self):
+        self.client.force_login(self.cand2)
+        response = self.client.get(self.dash_url)
+        self.assertEqual(response.status_code, 200)
+        upcoming = list(response.context["upcoming_interviews"])
+        self.assertIn(self.int_cand2, upcoming)
+        self.assertNotIn(self.int_future, upcoming)
