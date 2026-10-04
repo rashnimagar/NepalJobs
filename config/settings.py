@@ -10,22 +10,45 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def parse_bool(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {'true', '1', 'yes', 'on'}:
+        return True
+    if normalized in {'false', '0', 'no', 'off'}:
+        return False
+    return default
+
+
+def parse_allowed_hosts(value: str | None) -> list[str]:
+    if not value:
+        return ['127.0.0.1', 'localhost', 'testserver']
+    hosts = [h.strip() for h in value.split(',') if h.strip()]
+    return hosts if hosts else ['127.0.0.1', 'localhost', 'testserver']
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-3km1%yn-orl+042t9^m(=1qkx&-(twijx0^*%(3f77s=hv9c&9'
+# Reads SECRET_KEY from environment; uses an insecure dummy key strictly as a fallback for local development.
+SECRET_KEY = os.getenv(
+    'SECRET_KEY',
+    'django-insecure-3km1%yn-orl+042t9^m(=1qkx&-(twijx0^*%(3f77s=hv9c&9'
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = parse_bool(os.getenv('DEBUG'), default=True)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = parse_allowed_hosts(os.getenv('ALLOWED_HOSTS'))
 
 
 # Application definition

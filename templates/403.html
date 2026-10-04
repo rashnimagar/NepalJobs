@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block title %}Access Denied - NepalJobs{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center py-5">
+  <div class="col-md-8 col-lg-6 text-center">
+    <div class="card shadow-sm border-0 p-4 p-md-5">
+      <div class="mb-3">
+        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle fs-6 px-3 py-2">
+          403 Forbidden
+        </span>
+      </div>
+      <h1 class="h2 fw-bold text-dark mb-3">Access denied</h1>
+      <p class="text-secondary mb-4" style="line-height: 1.6;">
+        You do not have permission to access the requested resource. Please check your credentials or return to the homepage.
+      </p>
+      <div class="d-flex flex-wrap justify-content-center gap-3">
+        <a href="{% url 'home' %}" class="btn btn-primary px-4">Home</a>
+        <a href="{% url 'job_list' %}" class="btn btn-outline-primary px-4">Browse Jobs</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

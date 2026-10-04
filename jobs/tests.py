@@ -2836,3 +2836,142 @@ class SavedJobAdminTests(TestCase):
         self.assertIsInstance(admin_instance, SavedJobAdmin)
         self.assertEqual(admin_instance.ordering, ("-created_at",))
 
+
+# =====================================================================
+# STEP 6.14A — ENVIRONMENT CONFIGURATION & CUSTOM ERROR HANDLING TESTS
+# =====================================================================
+
+import os
+from unittest.mock import patch
+from django.core.exceptions import PermissionDenied
+from django.test import RequestFactory, override_settings
+from django.views.defaults import page_not_found, permission_denied, server_error
+from config.settings import parse_bool, parse_allowed_hosts
+
+
+class CustomErrorPagesTests(TestCase):
+    def setUp(self):
+        self.rf = RequestFactory()
+
+    @override_settings(DEBUG=False)
+    def test_custom_404_page_via_client(self):
+        response = self.client.get("/non-existent-nepaljobs-path-404/")
+        self.assertEqual(response.status_code, 404)
+        content = response.content.decode()
+        self.assertIn("Page not found", content)
+        self.assertIn("404 Error", content)
+        self.assertIn(reverse("home"), content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertIn("Home", content)
+        self.assertIn("Browse Jobs", content)
+        self.assertNotIn("Traceback (most recent call last)", content)
+
+    def test_custom_404_view_directly(self):
+        request = self.rf.get("/non-existent-url/")
+        response = page_not_found(request, Exception("Not Found"))
+        self.assertEqual(response.status_code, 404)
+        content = response.content.decode()
+        self.assertIn("Page not found", content)
+        self.assertIn("404 Error", content)
+        self.assertIn("The page you are looking for does not exist", content)
+        self.assertIn(reverse("home"), content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertNotIn("Traceback", content)
+
+    @override_settings(DEBUG=False)
+    def test_custom_403_page_via_client(self):
+        jobseeker = make_jobseeker(username="err_js_403", email="err_js_403@example.com")
+        self.client.force_login(jobseeker)
+        response = self.client.get(reverse("employer_job_create"))
+        self.assertEqual(response.status_code, 403)
+        content = response.content.decode()
+        self.assertIn("Access denied", content)
+        self.assertIn("403 Forbidden", content)
+        self.assertIn("You do not have permission to access the requested resource", content)
+        self.assertIn(reverse("home"), content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertIn("Home", content)
+        self.assertIn("Browse Jobs", content)
+        self.assertNotIn("Traceback (most recent call last)", content)
+
+    def test_custom_403_view_directly(self):
+        request = self.rf.get("/forbidden-url/")
+        response = permission_denied(request, PermissionDenied("Forbidden resource"))
+        self.assertEqual(response.status_code, 403)
+        content = response.content.decode()
+        self.assertIn("Access denied", content)
+        self.assertIn("403 Forbidden", content)
+        self.assertIn(reverse("home"), content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertNotIn("Traceback", content)
+
+    def test_custom_500_view_directly(self):
+        request = self.rf.get("/server-error-url/")
+        response = server_error(request)
+        self.assertEqual(response.status_code, 500)
+        content = response.content.decode()
+        self.assertIn("Something went wrong", content)
+        self.assertIn("500 Error", content)
+        self.assertIn("We encountered an unexpected server error", content)
+        self.assertIn(reverse("home"), content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertIn("Home", content)
+        self.assertIn("Browse Jobs", content)
+        self.assertNotIn("Traceback (most recent call last)", content)
+        self.assertNotIn("SECRET_KEY", content)
+        self.assertNotIn("settings.", content)
+
+    def test_error_pages_do_not_expose_debug_info(self):
+        for view_func, exc in [
+            (page_not_found, Exception("Sensitive internal error details")),
+            (permission_denied, PermissionDenied("Sensitive permission details")),
+            (server_error, None),
+        ]:
+            request = self.rf.get("/error-test/")
+            if exc is not None:
+                response = view_func(request, exc)
+            else:
+                response = view_func(request)
+            content = response.content.decode()
+            self.assertNotIn("Sensitive internal error details", content)
+            self.assertNotIn("Sensitive permission details", content)
+            self.assertNotIn("Traceback (most recent call last)", content)
+            self.assertNotIn("DJANGO_SETTINGS_MODULE", content)
+
+
+class EnvironmentConfigurationSettingsTests(TestCase):
+    def test_debug_parsing_true_values(self):
+        for val in ["true", "True", "TRUE", "1", "yes", "YES", "on", "ON", " true ", " On "]:
+            self.assertTrue(parse_bool(val, default=False), f"Expected True for {val!r}")
+
+    def test_debug_parsing_false_values(self):
+        for val in ["false", "False", "FALSE", "0", "no", "NO", "off", "OFF", " false ", " 0 "]:
+            self.assertFalse(parse_bool(val, default=True), f"Expected False for {val!r}")
+
+    def test_debug_parsing_none_and_fallbacks(self):
+        self.assertTrue(parse_bool(None, default=True))
+        self.assertFalse(parse_bool(None, default=False))
+        self.assertTrue(parse_bool("invalid_boolean_string", default=True))
+        self.assertFalse(parse_bool("invalid_boolean_string", default=False))
+
+    def test_allowed_hosts_parsing_custom_values(self):
+        hosts = parse_allowed_hosts("nepaljobs.com, www.nepaljobs.com, api.nepaljobs.com")
+        self.assertEqual(hosts, ["nepaljobs.com", "www.nepaljobs.com", "api.nepaljobs.com"])
+
+    def test_allowed_hosts_parsing_whitespace_and_empty_entries(self):
+        hosts = parse_allowed_hosts("  nepaljobs.com  ,  ,  staging.nepaljobs.com , ")
+        self.assertEqual(hosts, ["nepaljobs.com", "staging.nepaljobs.com"])
+
+    def test_allowed_hosts_safe_local_defaults(self):
+        default_hosts = ["127.0.0.1", "localhost", "testserver"]
+        self.assertEqual(parse_allowed_hosts(None), default_hosts)
+        self.assertEqual(parse_allowed_hosts(""), default_hosts)
+        self.assertEqual(parse_allowed_hosts("   ,  , "), default_hosts)
+
+    def test_secret_key_reads_from_environment(self):
+        test_key = "test-secret-key-env-12345"
+        with patch.dict(os.environ, {"SECRET_KEY": test_key}):
+            val = os.getenv("SECRET_KEY", "fallback")
+            self.assertEqual(val, test_key)
+
+
