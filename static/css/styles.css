@@ -91,4 +91,16 @@ footer {
   font-weight: 700;
   font-size: 2rem;
   user-select: none;
-}
+}
+
+.hover-light:hover,
+.hover-light:focus {
+  color: #f8fafc !important;
+  text-decoration: underline !important;
+}
+
+:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 2px;
+}
+

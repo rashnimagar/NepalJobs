@@ -19,7 +19,7 @@
           <span class="fw-semibold text-dark">{{ job.employer.company_name }}</span>
         </p>
 
-        <form method="post" action="{% url 'apply_job' job.pk %}">
+        <form method="post" action="{% url 'apply_job' job.pk %}" id="apply-job-form">
           {% csrf_token %}
           {% include 'includes/form_fields.html' %}
 
@@ -31,10 +31,10 @@
           </div>
 
           <div class="d-flex align-items-center gap-2">
-            <button type="submit" class="btn btn-primary px-4 py-2 fw-semibold">
+            <button type="submit" id="submit-application-btn" class="btn btn-primary px-4 py-2 fw-semibold" aria-label="Submit application for {{ job.title }}">
               Submit Application
             </button>
-            <a href="{% url 'job_detail' job.pk %}" class="btn btn-outline-secondary px-3 py-2">
+            <a href="{% url 'job_detail' job.pk %}" class="btn btn-outline-secondary px-3 py-2" aria-label="Cancel application">
               Cancel
             </a>
           </div>
@@ -81,4 +81,26 @@
     </div>
   </div>
 </div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var form = document.getElementById('apply-job-form');
+    var submitBtn = document.getElementById('submit-application-btn');
+    if (!form || !submitBtn) return;
+
+    var isSubmitting = false;
+    form.addEventListener('submit', function (e) {
+      if (isSubmitting) {
+        e.preventDefault();
+        return false;
+      }
+      if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+        return;
+      }
+      isSubmitting = true;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Submitting Application...';
+    });
+  });
+</script>
 {% endblock %}

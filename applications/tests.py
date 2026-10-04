@@ -2558,3 +2558,148 @@ class Step611EmployerAllApplicantsViewTests(TestCase):
         self.assertEqual(counts["applied"], 1)
         self.assertEqual(counts["shortlisted"], 1)
         self.assertEqual(counts["interview"], 0)
+
+
+# ===========================================================================
+# STEP 6.14E — APPLICATION CONFIRMATION & GLOBAL UX POLISH TESTS
+# ===========================================================================
+
+
+class ApplicationConfirmationAndUXPolishTests(TestCase):
+    def setUp(self):
+        self.employer_user = make_employer(
+            username="ux_emp",
+            email="ux_emp@example.com",
+            company_name="Himalayan Innovations",
+        )
+        self.employer = self.employer_user.employer_profile
+        self.candidate_user = make_jobseeker(username="ux_cand", email="ux_cand@example.com")
+        self.profile = self.candidate_user.jobseeker_profile
+        self.cv = CV.objects.create(
+            profile=self.profile,
+            title="Full-Stack CV",
+            file="cvs/resume.pdf",
+            original_filename="resume.pdf",
+            is_default=True,
+            is_active=True,
+        )
+        self.job = create_job(
+            self.employer,
+            title="Senior Django Architect",
+            status=Job.Status.PUBLISHED,
+            days_to_deadline=20,
+        )
+
+    def test_successful_application_produces_confirmation_state(self):
+        self.client.force_login(self.candidate_user)
+        post_data = {
+            "cv": self.cv.pk,
+            "cover_letter": "Excited to apply for the Senior Django Architect role.",
+        }
+        response = self.client.post(reverse("apply_job", args=[self.job.pk]), post_data, follow=True)
+        self.assertEqual(response.status_code, 200)
+
+        app = Application.objects.get(job=self.job, jobseeker=self.profile)
+        # 1. Confirms redirect to application detail
+        self.assertRedirects(response, reverse("jobseeker_application_detail", args=[app.pk]))
+
+        # 2. Confirmation contains correct job title and company name
+        content = response.content.decode()
+        self.assertIn("Application submitted successfully", content)
+        self.assertIn("Senior Django Architect", content)
+        self.assertIn("Himalayan Innovations", content)
+
+        # 3. Status is APPLIED
+        self.assertEqual(app.status, Application.Status.APPLIED)
+
+        # 4. Confirmation exposes valid existing next-action URLs
+        self.assertIn(reverse("jobseeker_application_list"), content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertIn(reverse("job_detail", args=[self.job.pk]), content)
+
+    def test_duplicate_application_blocked_and_redirected(self):
+        self.client.force_login(self.candidate_user)
+        # Create initial application
+        app = Application.objects.create(
+            job=self.job,
+            jobseeker=self.profile,
+            cv=self.cv,
+            status=Application.Status.APPLIED,
+        )
+        # Attempt second application
+        post_data = {
+            "cv": self.cv.pk,
+            "cover_letter": "Second attempt",
+        }
+        response = self.client.post(reverse("apply_job", args=[self.job.pk]), post_data, follow=True)
+        self.assertEqual(Application.objects.filter(job=self.job, jobseeker=self.profile).count(), 1)
+        self.assertRedirects(response, reverse("jobseeker_application_detail", args=[app.pk]))
+        content = response.content.decode()
+        self.assertIn("already applied", content.lower())
+
+    def test_deadline_closed_job_application_rejected(self):
+        self.client.force_login(self.candidate_user)
+        closed_job = create_job(
+            self.employer,
+            title="Closed Role",
+            status=Job.Status.CLOSED,
+        )
+        post_data = {"cv": self.cv.pk, "cover_letter": "Applying anyway"}
+        response = self.client.post(reverse("apply_job", args=[closed_job.pk]), post_data, follow=True)
+        self.assertEqual(Application.objects.filter(job=closed_job).count(), 0)
+        self.assertRedirects(response, reverse("job_list"))
+        content = response.content.decode()
+        self.assertIn("closed", content.lower())
+
+    def test_application_ownership_security(self):
+        other_candidate = make_jobseeker(username="other_cand", email="other_cand@example.com")
+        app = Application.objects.create(
+            job=self.job,
+            jobseeker=self.profile,
+            cv=self.cv,
+            status=Application.Status.APPLIED,
+        )
+        self.client.force_login(other_candidate)
+        response = self.client.get(reverse("jobseeker_application_detail", args=[app.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_footer_renders_with_valid_navigation(self):
+        # 1. Anonymous visitor
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("NepalJobs", content)
+        self.assertIn("For Jobseekers", content)
+        self.assertIn("For Employers", content)
+        self.assertIn("Platform", content)
+        self.assertIn(reverse("job_list"), content)
+        self.assertIn(reverse("register_jobseeker"), content)
+        self.assertIn(reverse("register_employer"), content)
+        self.assertIn(reverse("login"), content)
+        self.assertIn(str(timezone.now().year), content)
+
+        # 2. Authenticated Jobseeker visitor
+        self.client.force_login(self.candidate_user)
+        res_js = self.client.get(reverse("home"))
+        content_js = res_js.content.decode()
+        self.assertIn(reverse("jobseeker_application_list"), content_js)
+        self.assertIn(reverse("saved_job_list"), content_js)
+        self.assertIn(reverse("profile"), content_js)
+
+        # 3. Authenticated Employer visitor
+        self.client.force_login(self.employer_user)
+        res_emp = self.client.get(reverse("home"))
+        content_emp = res_emp.content.decode()
+        self.assertIn(reverse("employer_job_create"), content_emp)
+        self.assertIn(reverse("employer_job_list"), content_emp)
+        self.assertIn(reverse("employer_dashboard"), content_emp)
+
+    def test_apply_form_contains_client_protection_and_accessibility(self):
+        self.client.force_login(self.candidate_user)
+        response = self.client.get(reverse("apply_job", args=[self.job.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('id="apply-job-form"', content)
+        self.assertIn('id="submit-application-btn"', content)
+        self.assertIn("isSubmitting", content)
+        self.assertIn("aria-label", content)

@@ -3,10 +3,20 @@
 {% block title %}Application for {{ application.job.title }} - NepalJobs{% endblock %}
 
 {% block content %}
-<div class="mb-3">
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
   <a href="{% url 'jobseeker_application_list' %}" class="text-decoration-none small text-muted">
     &larr; Back to My Applications
   </a>
+  <div class="d-flex gap-2">
+    <a href="{% url 'job_list' %}" class="btn btn-outline-secondary btn-sm" aria-label="Browse more jobs">
+      Browse More Jobs
+    </a>
+    {% if application.job.is_open %}
+      <a href="{% url 'job_detail' application.job.pk %}" class="btn btn-outline-primary btn-sm" aria-label="Return to job posting">
+        Return to Job
+      </a>
+    {% endif %}
+  </div>
 </div>
 
 {# Application Header Card #}
@@ -341,6 +351,33 @@
             View Company Profile
           </a>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Next Actions Navigation Card #}
+<div class="card shadow-sm border-0 mb-4 bg-light">
+  <div class="card-body p-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+      <div>
+        <h5 class="h6 fw-bold mb-1">What would you like to do next?</h5>
+        <p class="text-secondary small mb-0">
+          Track application status updates, review submitted credentials, or explore more opportunities.
+        </p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a href="{% url 'jobseeker_application_list' %}" class="btn btn-primary btn-sm fw-medium">
+          View My Applications
+        </a>
+        <a href="{% url 'job_list' %}" class="btn btn-outline-primary btn-sm fw-medium">
+          Browse More Jobs
+        </a>
+        {% if application.job.is_open %}
+          <a href="{% url 'job_detail' application.job.pk %}" class="btn btn-outline-secondary btn-sm fw-medium">
+            Return to Job
+          </a>
+        {% endif %}
       </div>
     </div>
   </div>

@@ -67,7 +67,100 @@
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="container py-3 text-center">NepalJobs</footer>
+  <footer class="bg-dark text-light py-5 mt-auto border-top border-secondary-subtle">
+    <div class="container">
+      <div class="row g-4 mb-4">
+        {# Section 1: Brand & Purpose #}
+        <div class="col-lg-4 col-md-6">
+          <h5 class="fw-bold mb-2">Nepal<span class="text-info">Jobs</span></h5>
+          <p class="text-secondary small mb-3" style="line-height: 1.7;">
+            Nepal's dedicated recruitment platform connecting qualified jobseekers with verified employers across Nepal.
+          </p>
+          <div class="small text-secondary">
+            Verified companies &bull; Transparent careers
+          </div>
+        </div>
+
+        {# Section 2: For Jobseekers #}
+        <div class="col-lg-3 col-md-6">
+          <h6 class="text-uppercase fw-semibold text-white small mb-3">For Jobseekers</h6>
+          <ul class="list-unstyled small mb-0 d-flex flex-column gap-2">
+            <li>
+              <a href="{% url 'job_list' %}" class="text-secondary text-decoration-none hover-light">Browse Jobs</a>
+            </li>
+            {% if user.is_authenticated and user.is_jobseeker and not user.is_staff %}
+              <li>
+                <a href="{% url 'jobseeker_application_list' %}" class="text-secondary text-decoration-none hover-light">My Applications</a>
+              </li>
+              <li>
+                <a href="{% url 'saved_job_list' %}" class="text-secondary text-decoration-none hover-light">Saved Jobs</a>
+              </li>
+              <li>
+                <a href="{% url 'profile' %}" class="text-secondary text-decoration-none hover-light">My Profile</a>
+              </li>
+            {% else %}
+              <li>
+                <a href="{% url 'register_jobseeker' %}" class="text-secondary text-decoration-none hover-light">Create Candidate Account</a>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+
+        {# Section 3: For Employers #}
+        <div class="col-lg-3 col-md-6">
+          <h6 class="text-uppercase fw-semibold text-white small mb-3">For Employers</h6>
+          <ul class="list-unstyled small mb-0 d-flex flex-column gap-2">
+            {% if user.is_authenticated and user.is_employer and not user.is_staff %}
+              <li>
+                <a href="{% url 'employer_job_create' %}" class="text-secondary text-decoration-none hover-light">Post a Job</a>
+              </li>
+              <li>
+                <a href="{% url 'employer_job_list' %}" class="text-secondary text-decoration-none hover-light">Manage Jobs</a>
+              </li>
+              <li>
+                <a href="{% url 'employer_dashboard' %}" class="text-secondary text-decoration-none hover-light">Recruitment Dashboard</a>
+              </li>
+            {% else %}
+              <li>
+                <a href="{% url 'register_employer' %}" class="text-secondary text-decoration-none hover-light">Register as Employer</a>
+              </li>
+              <li>
+                <a href="{% url 'login' %}" class="text-secondary text-decoration-none hover-light">Employer Sign In</a>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+
+        {# Section 4: Platform #}
+        <div class="col-lg-2 col-md-6">
+          <h6 class="text-uppercase fw-semibold text-white small mb-3">Platform</h6>
+          <ul class="list-unstyled small mb-0 d-flex flex-column gap-2">
+            <li>
+              <a href="{% url 'home' %}" class="text-secondary text-decoration-none hover-light">Home</a>
+            </li>
+            <li>
+              <a href="{% url 'job_list' %}" class="text-secondary text-decoration-none hover-light">Explore Vacancies</a>
+            </li>
+            {% if user.is_authenticated %}
+              <li>
+                <a href="{% url 'dashboard' %}" class="text-secondary text-decoration-none hover-light">Dashboard</a>
+              </li>
+            {% else %}
+              <li>
+                <a href="{% url 'login' %}" class="text-secondary text-decoration-none hover-light">Sign In</a>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+
+      {# Bottom Copyright #}
+      <div class="border-top border-secondary pt-3 d-flex flex-column flex-sm-row justify-content-between align-items-center gap-2 small text-secondary">
+        <div>&copy; {% now "Y" %} NepalJobs. All rights reserved.</div>
+        <div>Built for Nepal's hiring ecosystem.</div>
+      </div>
+    </div>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>

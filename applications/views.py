@@ -79,7 +79,10 @@ def apply_job(request, job_pk):
 
             notify_application_submitted(application)
 
-            messages.success(request, f"Your application for '{job.title}' was submitted successfully.")
+            messages.success(
+                request,
+                f"Application submitted successfully! Your application for '{job.title}' at {job.employer.company_name} was received.",
+            )
             return redirect("jobseeker_application_detail", pk=application.pk)
     else:
         form = JobApplicationForm(jobseeker=profile)
