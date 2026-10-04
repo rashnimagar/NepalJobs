@@ -1,27 +1,298 @@
 {% extends 'base.html' %}
 
-{% block title %}NepalJobs - Discover Jobs in Nepal{% endblock %}
+{% block title %}NepalJobs - Discover Career Opportunities in Nepal{% endblock %}
 
 {% block content %}
-<div class="p-5 mb-4 bg-white rounded-3 shadow-sm text-center">
-  <div class="container-fluid py-4">
-    <h1 class="display-5 fw-bold text-dark mb-3">Find Your Next Dream Career in Nepal</h1>
-    <p class="col-md-8 fs-5 text-muted mx-auto mb-4">
-      Explore thousands of verified job vacancies across Kathmandu, Pokhara, Lalitpur, and throughout Nepal.
-    </p>
+<div class="d-flex flex-column gap-5 py-2">
 
-    <form method="get" action="{% url 'job_list' %}" class="row justify-content-center g-2 mb-4" style="max-width: 640px; margin: 0 auto;">
-      <div class="col-sm-8">
-        <input type="text" name="q" class="form-control form-control-lg" placeholder="Job title, skills, or company...">
-      </div>
-      <div class="col-sm-4">
-        <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold">Search Jobs</button>
-      </div>
-    </form>
+  {# 1. HERO & PRIMARY SEARCH #}
+  <section class="card shadow-sm border-0 bg-white p-4 p-md-5 text-center" aria-labelledby="hero-heading">
+    <div class="py-2 py-md-3">
+      <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 rounded-pill mb-3 fw-medium">
+        Nepal's Modern Recruitment Platform
+      </span>
+      <h1 id="hero-heading" class="display-5 fw-bold text-dark mb-3">
+        Find Your Next Opportunity in Nepal
+      </h1>
+      <p class="col-lg-8 fs-5 text-muted mx-auto mb-4" style="line-height: 1.6;">
+        Connecting ambitious candidates with verified employers across tech, finance, design, healthcare, and beyond.
+      </p>
 
-    <div class="d-flex justify-content-center gap-3">
-      <a href="{% url 'job_list' %}" class="btn btn-outline-primary btn-sm px-4">Browse All Jobs</a>
+      {# Search Form #}
+      <form method="get" action="{% url 'job_list' %}" class="row justify-content-center g-2 mb-4" role="search" style="max-width: 680px; margin: 0 auto;">
+        <div class="col-sm-8">
+          <label for="home-search-input" class="visually-hidden">Search jobs</label>
+          <input
+            type="search"
+            id="home-search-input"
+            name="q"
+            class="form-control form-control-lg"
+            placeholder="Job title, skill, or keyword..."
+            aria-label="Job title, skill, or keyword"
+          >
+        </div>
+        <div class="col-sm-4">
+          <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold">
+            Search Jobs
+          </button>
+        </div>
+      </form>
+
+      {# Quick Action CTAs #}
+      <div class="d-flex flex-wrap justify-content-center align-items-center gap-2">
+        <a href="{% url 'job_list' %}" class="btn btn-outline-primary btn-sm px-4">
+          Browse All Jobs
+        </a>
+        {% if not user.is_authenticated %}
+          <a href="{% url 'register' %}" class="btn btn-outline-secondary btn-sm px-4">
+            For Employers
+          </a>
+        {% elif user.is_employer %}
+          <a href="{% url 'employer_job_create' %}" class="btn btn-outline-secondary btn-sm px-4">
+            Post a Job
+          </a>
+        {% elif user.is_jobseeker %}
+          <a href="{% url 'jobseeker_application_list' %}" class="btn btn-outline-secondary btn-sm px-4">
+            My Applications
+          </a>
+        {% endif %}
+      </div>
     </div>
-  </div>
+  </section>
+
+  {# 2. PLATFORM STATISTICS #}
+  <section aria-labelledby="stats-heading">
+    <h2 id="stats-heading" class="visually-hidden">Platform Statistics</h2>
+    <div class="row g-3 text-center">
+      <div class="col-6 col-md-3">
+        <div class="card shadow-sm border-0 p-3 h-100 bg-white">
+          <div class="display-6 fw-bold text-primary mb-1">{{ stats.open_jobs }}</div>
+          <div class="text-secondary small fw-medium text-uppercase">Open Positions</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card shadow-sm border-0 p-3 h-100 bg-white">
+          <div class="display-6 fw-bold text-success mb-1">{{ stats.companies }}</div>
+          <div class="text-secondary small fw-medium text-uppercase">Verified Companies</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card shadow-sm border-0 p-3 h-100 bg-white">
+          <div class="display-6 fw-bold text-info mb-1">{{ stats.categories }}</div>
+          <div class="text-secondary small fw-medium text-uppercase">Job Categories</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card shadow-sm border-0 p-3 h-100 bg-white">
+          <div class="display-6 fw-bold text-dark mb-1">{{ stats.jobseekers }}</div>
+          <div class="text-secondary small fw-medium text-uppercase">Active Jobseekers</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# 3. VALUE PROPOSITION #}
+  <section aria-labelledby="value-heading">
+    <div class="text-center mb-4">
+      <h2 id="value-heading" class="h3 fw-bold text-dark mb-2">Why NepalJobs?</h2>
+      <p class="text-muted mb-0">Built specifically for the dynamic recruitment landscape of Nepal.</p>
+    </div>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="card shadow-sm border-0 p-4 h-100 bg-white">
+          <div class="mb-3">
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle p-2 fs-6">
+              &#10003;
+            </span>
+          </div>
+          <h3 class="h5 fw-bold text-dark mb-2">Verified Employers</h3>
+          <p class="text-secondary small mb-0" style="line-height: 1.6;">
+            Every hiring organization is reviewed for legitimacy and business credentials, ensuring you apply only to genuine vacancies.
+          </p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card shadow-sm border-0 p-4 h-100 bg-white">
+          <div class="mb-3">
+            <span class="badge bg-success-subtle text-success border border-success-subtle p-2 fs-6">
+              &#9776;
+            </span>
+          </div>
+          <h3 class="h5 fw-bold text-dark mb-2">Transparent Listings</h3>
+          <p class="text-secondary small mb-0" style="line-height: 1.6;">
+            Explore clear salary ranges, explicit deadlines, required skills, and remote work options on every vacancy.
+          </p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card shadow-sm border-0 p-4 h-100 bg-white">
+          <div class="mb-3">
+            <span class="badge bg-info-subtle text-info border border-info-subtle p-2 fs-6">
+              &#9993;
+            </span>
+          </div>
+          <h3 class="h5 fw-bold text-dark mb-2">Direct Applications</h3>
+          <p class="text-secondary small mb-0" style="line-height: 1.6;">
+            Apply in seconds using your custom CV, track your status progression live, and manage interviews all in one place.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# 4. POPULAR CATEGORIES #}
+  {% if categories %}
+    <section aria-labelledby="categories-heading">
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+          <h2 id="categories-heading" class="h3 fw-bold text-dark mb-1">Explore by Category</h2>
+          <p class="text-muted small mb-0">Browse job openings by professional sector</p>
+        </div>
+        <a href="{% url 'job_list' %}" class="btn btn-outline-primary btn-sm">View All Categories</a>
+      </div>
+      <div class="row g-3">
+        {% for category in categories %}
+          <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'job_list' %}?category={{ category.slug }}" class="card shadow-sm border-0 h-100 text-decoration-none bg-white p-3 d-flex flex-column justify-content-between">
+              <div>
+                <h3 class="h6 fw-bold text-dark mb-1">{{ category.name }}</h3>
+                {% if category.description %}
+                  <p class="text-muted small mb-2 text-truncate" title="{{ category.description }}">{{ category.description }}</p>
+                {% endif %}
+              </div>
+              <div>
+                <span class="badge bg-light text-secondary border small">
+                  {{ category.open_jobs_count }} open position{{ category.open_jobs_count|pluralize }}
+                </span>
+              </div>
+            </a>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# 5. RECENT / OPEN JOBS #}
+  <section aria-labelledby="recent-jobs-heading">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+      <div>
+        <h2 id="recent-jobs-heading" class="h3 fw-bold text-dark mb-1">Recent Opportunities</h2>
+        <p class="text-muted small mb-0">Latest verified job vacancies ready for application</p>
+      </div>
+      <a href="{% url 'job_list' %}" class="btn btn-outline-primary btn-sm">Browse All Jobs &rarr;</a>
+    </div>
+
+    {% if recent_jobs %}
+      <div class="row g-3">
+        {% for job in recent_jobs %}
+          <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0 p-4 h-100 bg-white d-flex flex-column justify-content-between">
+              <div>
+                <div class="d-flex align-items-start gap-3 mb-3">
+                  <div class="flex-shrink-0">
+                    {% if job.employer.logo %}
+                      <img src="{{ job.employer.logo.url }}" alt="{{ job.employer.company_name }} Logo" class="company-logo-lg">
+                    {% else %}
+                      <div class="company-logo-placeholder">{{ job.employer.company_name|slice:":1"|upper }}</div>
+                    {% endif %}
+                  </div>
+                  <div class="flex-grow-1 min-w-0">
+                    <h3 class="h5 fw-bold mb-1 text-truncate">
+                      <a href="{% url 'job_detail' job.pk %}" class="text-decoration-none text-dark">
+                        {{ job.title }}
+                      </a>
+                    </h3>
+                    <div class="text-muted small text-truncate">
+                      <a href="{% url 'company_detail' job.employer.pk %}" class="text-decoration-none text-secondary fw-medium">
+                        {{ job.employer.company_name }}
+                      </a>
+                      &bull; {{ job.location.name }}
+                      {% if job.is_remote %}
+                        <span class="badge bg-info-subtle text-info-emphasis ms-1">Remote</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div>
+                    <span class="badge bg-light text-dark border">{{ job.get_employment_type_display }}</span>
+                  </div>
+                </div>
+
+                <p class="text-secondary small mb-3" style="line-height: 1.6;">
+                  {{ job.description|truncatewords:20 }}
+                </p>
+
+                <div class="d-flex flex-wrap align-items-center gap-1 mb-3">
+                  <span class="badge bg-light text-muted border">{{ job.category.name }}</span>
+                  {% for skill in job.required_skills.all|slice:":3" %}
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle">{{ skill.name }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+
+              <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center pt-3 border-top gap-2">
+                <div class="small text-muted">
+                  <div><strong>Salary:</strong> {{ job.salary_display }}</div>
+                  <div><strong>Deadline:</strong> {{ job.application_deadline|date:"M d, Y" }}</div>
+                </div>
+                <div>
+                  <a href="{% url 'job_detail' job.pk %}" class="btn btn-outline-primary btn-sm px-3">
+                    View Details
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="card shadow-sm border-0 bg-white p-5 text-center">
+        <h3 class="h5 fw-bold text-dark mb-2">No Active Vacancies at This Moment</h3>
+        <p class="text-muted small mb-3">New opportunities are published regularly. Check back soon or explore our categories.</p>
+        <div>
+          <a href="{% url 'job_list' %}" class="btn btn-primary btn-sm px-4">Browse All Vacancies</a>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  {# 6. EMPLOYER CTA #}
+  <section class="card shadow-sm border-0 bg-white p-4 p-md-5 text-center" aria-labelledby="hire-heading">
+    <div class="py-2 py-md-3">
+      <span class="badge bg-success-subtle text-success border border-success-subtle px-3 py-2 rounded-pill mb-3 fw-medium">
+        Hiring in Nepal?
+      </span>
+      <h2 id="hire-heading" class="h3 fw-bold text-dark mb-3">
+        Looking to Hire Great Talent?
+      </h2>
+      <p class="col-lg-8 fs-6 text-muted mx-auto mb-4" style="line-height: 1.6;">
+        Join verified employers using NepalJobs to publish vacancies, manage applicant pipelines, review qualified candidate CVs, and coordinate interviews effortlessly.
+      </p>
+      <div class="d-flex flex-wrap justify-content-center gap-3">
+        {% if not user.is_authenticated %}
+          <a href="{% url 'register' %}" class="btn btn-primary px-4 fw-semibold">
+            Register as an Employer
+          </a>
+          <a href="{% url 'login' %}" class="btn btn-outline-secondary px-4">
+            Employer Sign In
+          </a>
+        {% elif user.is_employer %}
+          <a href="{% url 'employer_job_create' %}" class="btn btn-primary px-4 fw-semibold">
+            Post a Vacancy
+          </a>
+          <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary px-4">
+            Recruitment Dashboard
+          </a>
+        {% elif user.is_jobseeker %}
+          <a href="{% url 'job_list' %}" class="btn btn-primary px-4 fw-semibold">
+            Find Your Next Job
+          </a>
+          <a href="{% url 'jobseeker_application_list' %}" class="btn btn-outline-secondary px-4">
+            View My Applications
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
 </div>
 {% endblock %}

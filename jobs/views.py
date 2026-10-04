@@ -8,7 +8,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from accounts.decorators import approved_employer_required, jobseeker_required
-from accounts.models import EmployerProfile
+from accounts.models import EmployerProfile, JobseekerProfile
 from jobs.forms import JobForm
 from jobs.models import Category, Job, Location, SavedJob
 
@@ -16,7 +16,45 @@ PAGE_SIZE = 10
 
 
 def home(request):
-    return render(request, "home.html")
+    today = timezone.localdate()
+
+    categories = (
+        Category.objects.filter(is_active=True)
+        .annotate(
+            open_jobs_count=Count(
+                "jobs",
+                filter=Q(
+                    jobs__status=Job.Status.PUBLISHED,
+                    jobs__application_deadline__gte=today,
+                    jobs__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
+                ),
+            )
+        )
+        .order_by("-open_jobs_count", "name")[:8]
+    )
+
+    recent_jobs = (
+        Job.objects.open_jobs()
+        .select_related("employer", "category", "location")
+        .prefetch_related("required_skills")
+        .order_by("-published_at", "-created_at")[:6]
+    )
+
+    stats = {
+        "open_jobs": Job.objects.open_jobs().count(),
+        "companies": EmployerProfile.objects.filter(
+            verification_status=EmployerProfile.VerificationStatus.APPROVED
+        ).count(),
+        "categories": Category.objects.filter(is_active=True).count(),
+        "jobseekers": JobseekerProfile.objects.count(),
+    }
+
+    context = {
+        "categories": categories,
+        "recent_jobs": recent_jobs,
+        "stats": stats,
+    }
+    return render(request, "home.html", context)
 
 
 def job_list(request):

@@ -2975,3 +2975,378 @@ class EnvironmentConfigurationSettingsTests(TestCase):
             self.assertEqual(val, test_key)
 
 
+# =====================================================================
+# STEP 6.14B — IDEMPOTENT DEMO DATA MANAGEMENT COMMAND TESTS
+# =====================================================================
+
+import io
+from django.core.management import call_command
+from applications.models import Interview
+from notifications.models import Notification
+from jobs.management.commands.seed_demo_data import DEMO_PASSWORD
+
+
+class SeedDemoDataCommandTests(TestCase):
+    def test_command_execution_and_summary_output(self):
+        out = io.StringIO()
+        call_command("seed_demo_data", stdout=out)
+        output = out.getvalue()
+        self.assertIn("Demo data seeded successfully.", output)
+        self.assertIn("Users:", output)
+        self.assertIn("Employers:", output)
+        self.assertIn("Jobseekers:", output)
+        self.assertIn("Categories:", output)
+        self.assertIn("Locations:", output)
+        self.assertIn("Jobs:", output)
+        self.assertIn("Applications:", output)
+        self.assertIn("Interviews:", output)
+        self.assertIn("Notifications:", output)
+        self.assertIn("Saved Jobs:", output)
+        self.assertIn("Demo Credentials (DEMO ONLY - Do not use in production):", output)
+        self.assertIn(DEMO_PASSWORD, output)
+
+    def test_demo_users_and_roles_created(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        admin = User.objects.get(username="demo_admin")
+        self.assertTrue(admin.is_staff)
+        self.assertTrue(admin.is_superuser)
+        self.assertTrue(admin.check_password(DEMO_PASSWORD))
+
+        emp_tech = User.objects.get(username="demo_emp_tech")
+        self.assertEqual(emp_tech.role, User.Role.EMPLOYER)
+        self.assertTrue(emp_tech.is_employer)
+        self.assertTrue(emp_tech.check_password(DEMO_PASSWORD))
+
+        emp_fin = User.objects.get(username="demo_emp_fin")
+        self.assertEqual(emp_fin.role, User.Role.EMPLOYER)
+        self.assertTrue(emp_fin.is_employer)
+        self.assertTrue(emp_fin.check_password(DEMO_PASSWORD))
+
+        for username in ["demo_js_ram", "demo_js_sita", "demo_js_kiran"]:
+            js = User.objects.get(username=username)
+            self.assertEqual(js.role, User.Role.JOBSEEKER)
+            self.assertTrue(js.is_jobseeker)
+            self.assertTrue(js.check_password(DEMO_PASSWORD))
+
+    def test_employer_profiles_created_and_approved(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        tech_prof = EmployerProfile.objects.get(user__username="demo_emp_tech")
+        self.assertEqual(tech_prof.company_name, "Himalayan Tech Solutions")
+        self.assertEqual(tech_prof.verification_status, EmployerProfile.VerificationStatus.APPROVED)
+        self.assertTrue(tech_prof.is_approved)
+        self.assertTrue(tech_prof.industry)
+        self.assertTrue(tech_prof.phone)
+        self.assertTrue(tech_prof.address)
+        self.assertTrue(tech_prof.website)
+        self.assertTrue(tech_prof.description)
+
+        fin_prof = EmployerProfile.objects.get(user__username="demo_emp_fin")
+        self.assertEqual(fin_prof.company_name, "Everest Financial Group")
+        self.assertEqual(fin_prof.verification_status, EmployerProfile.VerificationStatus.APPROVED)
+        self.assertTrue(fin_prof.is_approved)
+
+    def test_jobseeker_profiles_and_cvs_created(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        for username in ["demo_js_ram", "demo_js_sita", "demo_js_kiran"]:
+            profile = JobseekerProfile.objects.get(user__username=username)
+            self.assertTrue(profile.location)
+            self.assertTrue(profile.summary)
+            self.assertTrue(profile.skills.exists())
+            self.assertTrue(profile.cvs.filter(is_active=True).exists())
+            self.assertTrue(profile.educations.exists())
+            self.assertTrue(profile.experiences.exists())
+
+    def test_taxonomy_categories_and_locations_created(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        self.assertTrue(Category.objects.filter(slug="software-development").exists())
+        self.assertTrue(Category.objects.filter(slug="web-development").exists())
+        self.assertTrue(Category.objects.filter(slug="marketing-communications").exists())
+        self.assertTrue(Category.objects.filter(slug="finance-accounting").exists())
+        self.assertTrue(Category.objects.filter(slug="human-resources").exists())
+        self.assertTrue(Category.objects.filter(slug="design-creative").exists())
+
+        self.assertTrue(Location.objects.filter(slug="kathmandu").exists())
+        self.assertTrue(Location.objects.filter(slug="lalitpur").exists())
+        self.assertTrue(Location.objects.filter(slug="bhaktapur").exists())
+        remote_loc = Location.objects.get(slug="remote-nepal")
+        self.assertTrue(remote_loc.is_remote)
+
+    def test_jobs_created_with_lifecycle_states(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        self.assertGreaterEqual(Job.objects.filter(status=Job.Status.PUBLISHED).count(), 5)
+        self.assertGreaterEqual(Job.objects.filter(status=Job.Status.DRAFT).count(), 1)
+        self.assertGreaterEqual(Job.objects.filter(status=Job.Status.CLOSED).count(), 1)
+        self.assertGreaterEqual(Job.objects.open_jobs().count(), 5)
+
+        self.assertTrue(Job.objects.filter(is_remote=True).exists())
+        self.assertTrue(Job.objects.filter(salary_min__isnull=False, salary_max__isnull=False).exists())
+        self.assertTrue(Job.objects.filter(is_salary_negotiable=True).exists())
+
+    def test_applications_created_with_valid_statuses_and_history(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        statuses_found = set(Application.objects.values_list("status", flat=True))
+        for status in [
+            Application.Status.APPLIED,
+            Application.Status.UNDER_REVIEW,
+            Application.Status.SHORTLISTED,
+            Application.Status.INTERVIEW,
+            Application.Status.SELECTED,
+            Application.Status.REJECTED,
+        ]:
+            self.assertIn(status, statuses_found)
+
+        selected_app = Application.objects.get(status=Application.Status.SELECTED)
+        self.assertGreaterEqual(selected_app.status_history.count(), 1)
+
+    def test_interviews_created_with_valid_states(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        scheduled_iv = Interview.objects.get(status=Interview.InterviewStatus.SCHEDULED)
+        self.assertGreater(scheduled_iv.scheduled_at, timezone.now())
+        self.assertEqual(scheduled_iv.interview_type, Interview.InterviewType.VIDEO)
+
+        completed_iv = Interview.objects.get(status=Interview.InterviewStatus.COMPLETED)
+        self.assertEqual(completed_iv.interview_type, Interview.InterviewType.IN_PERSON)
+        self.assertIn("Outcome", completed_iv.internal_notes)
+
+    def test_notifications_created_read_and_unread(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        self.assertTrue(Notification.objects.filter(is_read=True).exists())
+        self.assertTrue(Notification.objects.filter(is_read=False).exists())
+        self.assertTrue(Notification.objects.filter(recipient__role=User.Role.JOBSEEKER).exists())
+        self.assertTrue(Notification.objects.filter(recipient__role=User.Role.EMPLOYER).exists())
+
+    def test_saved_jobs_created(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        self.assertTrue(SavedJob.objects.exists())
+        ram_saved_count = SavedJob.objects.filter(jobseeker__user__username="demo_js_ram").count()
+        self.assertGreaterEqual(ram_saved_count, 2)
+
+    def test_command_idempotency_second_run_no_duplicates(self):
+        call_command("seed_demo_data", stdout=io.StringIO())
+        counts_run1 = {
+            "users": User.objects.count(),
+            "employer_profiles": EmployerProfile.objects.count(),
+            "jobseeker_profiles": JobseekerProfile.objects.count(),
+            "categories": Category.objects.count(),
+            "locations": Location.objects.count(),
+            "jobs": Job.objects.count(),
+            "applications": Application.objects.count(),
+            "interviews": Interview.objects.count(),
+            "notifications": Notification.objects.count(),
+            "saved_jobs": SavedJob.objects.count(),
+        }
+
+        call_command("seed_demo_data", stdout=io.StringIO())
+        counts_run2 = {
+            "users": User.objects.count(),
+            "employer_profiles": EmployerProfile.objects.count(),
+            "jobseeker_profiles": JobseekerProfile.objects.count(),
+            "categories": Category.objects.count(),
+            "locations": Location.objects.count(),
+            "jobs": Job.objects.count(),
+            "applications": Application.objects.count(),
+            "interviews": Interview.objects.count(),
+            "notifications": Notification.objects.count(),
+            "saved_jobs": SavedJob.objects.count(),
+        }
+
+        self.assertEqual(counts_run1, counts_run2)
+
+    def test_existing_unrelated_records_not_deleted(self):
+        unrelated_user = User.objects.create_user(
+            username="unrelated_real_user",
+            email="real@example.com",
+            password="RealPassword123!",
+            role=User.Role.JOBSEEKER,
+        )
+        unrelated_cat = Category.objects.create(
+            name="Unrelated Real Category",
+            slug="unrelated-real-category",
+        )
+
+        call_command("seed_demo_data", stdout=io.StringIO())
+
+        self.assertTrue(User.objects.filter(pk=unrelated_user.pk).exists())
+        self.assertTrue(Category.objects.filter(pk=unrelated_cat.pk).exists())
+
+
+# =====================================================================
+# STEP 6.14C — HOME / LANDING PAGE PRODUCT POLISH TESTS
+# =====================================================================
+
+class HomePagePolishTests(TestCase):
+    def test_homepage_returns_200_and_uses_template(self):
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "home.html")
+        self.assertTemplateUsed(response, "base.html")
+
+    def test_hero_and_search_ui_present(self):
+        response = self.client.get(reverse("home"))
+        content = response.content.decode()
+        self.assertIn("Find Your Next Opportunity in Nepal", content)
+        self.assertIn('action="/jobs/"', content)
+        self.assertIn('name="q"', content)
+        self.assertIn("Search Jobs", content)
+
+    def test_browse_jobs_cta_present(self):
+        response = self.client.get(reverse("home"))
+        content = response.content.decode()
+        self.assertIn("Browse All Jobs", content)
+        self.assertIn(reverse("job_list"), content)
+
+    def test_active_categories_appear_and_inactive_excluded(self):
+        active_cat = Category.objects.create(name="Active Engineering", slug="active-eng", is_active=True)
+        inactive_cat = Category.objects.create(name="Hidden Inactive Cat", slug="hidden-cat", is_active=False)
+
+        response = self.client.get(reverse("home"))
+        content = response.content.decode()
+        self.assertIn("Active Engineering", content)
+        self.assertIn(f"?category={active_cat.slug}", content)
+        self.assertNotIn("Hidden Inactive Cat", content)
+
+    def test_open_jobs_appear_and_closed_expired_excluded(self):
+        emp = make_approved_employer(username="home_emp", email="home_emp@example.com")
+        cat = make_category(name="Home Cat", slug="home-cat")
+        loc = make_location(name="Home Loc", slug="home-loc")
+        today = timezone.localdate()
+
+        open_job = Job.objects.create(
+            employer=emp,
+            category=cat,
+            location=loc,
+            title="Open Python Lead",
+            description="Leading backend development team.",
+            salary_min=100000,
+            salary_max=150000,
+            application_deadline=today + timedelta(days=15),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        draft_job = Job.objects.create(
+            employer=emp,
+            category=cat,
+            location=loc,
+            title="Draft Hidden Role",
+            description="Not yet published.",
+            application_deadline=today + timedelta(days=15),
+            status=Job.Status.DRAFT,
+        )
+        closed_job = Job.objects.create(
+            employer=emp,
+            category=cat,
+            location=loc,
+            title="Closed Hidden Role",
+            description="Already filled.",
+            application_deadline=today + timedelta(days=15),
+            status=Job.Status.CLOSED,
+            published_at=timezone.now() - timedelta(days=5),
+        )
+        expired_job = Job.objects.create(
+            employer=emp,
+            category=cat,
+            location=loc,
+            title="Expired Hidden Role",
+            description="Deadline passed.",
+            application_deadline=today - timedelta(days=2),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now() - timedelta(days=10),
+        )
+
+        response = self.client.get(reverse("home"))
+        content = response.content.decode()
+        self.assertIn("Open Python Lead", content)
+        self.assertNotIn("Draft Hidden Role", content)
+        self.assertNotIn("Closed Hidden Role", content)
+        self.assertNotIn("Expired Hidden Role", content)
+
+    def test_job_cards_link_to_job_detail_and_company_detail(self):
+        emp = make_approved_employer(username="link_emp", email="link_emp@example.com")
+        cat = make_category(name="Link Cat", slug="link-cat")
+        loc = make_location(name="Link Loc", slug="link-loc")
+        job = Job.objects.create(
+            employer=emp,
+            category=cat,
+            location=loc,
+            title="Frontend Specialist",
+            description="Building high quality web UIs.",
+            application_deadline=timezone.localdate() + timedelta(days=20),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse("home"))
+        content = response.content.decode()
+        self.assertIn(reverse("job_detail", args=[job.pk]), content)
+        self.assertIn(reverse("company_detail", args=[emp.pk]), content)
+
+    def test_platform_statistics_render_accurate_values(self):
+        emp = make_approved_employer(username="stats_emp", email="stats_emp@example.com")
+        cat = make_category(name="Stats Cat", slug="stats-cat")
+        loc = make_location(name="Stats Loc", slug="stats-loc")
+        js = make_jobseeker(username="stats_js", email="stats_js@example.com")
+        job = Job.objects.create(
+            employer=emp,
+            category=cat,
+            location=loc,
+            title="Senior QA Engineer",
+            description="Quality assurance and automation.",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        stats = response.context["stats"]
+        self.assertEqual(stats["open_jobs"], 1)
+        self.assertEqual(stats["companies"], 1)
+        self.assertEqual(stats["categories"], 1)
+        self.assertEqual(stats["jobseekers"], 1)
+
+    def test_employer_cta_links_and_role_awareness(self):
+        # 1. Anonymous visitor
+        response = self.client.get(reverse("home"))
+        content = response.content.decode()
+        self.assertIn(reverse("register"), content)
+        self.assertIn(reverse("login"), content)
+        self.assertIn("Looking to Hire Great Talent?", content)
+
+        # 2. Authenticated Employer
+        emp = make_approved_employer(username="cta_emp", email="cta_emp@example.com")
+        self.client.force_login(emp.user)
+        response_emp = self.client.get(reverse("home"))
+        content_emp = response_emp.content.decode()
+        self.assertIn(reverse("employer_job_create"), content_emp)
+        self.assertIn(reverse("dashboard"), content_emp)
+
+        # 3. Authenticated Jobseeker
+        js = make_jobseeker(username="cta_js", email="cta_js@example.com")
+        self.client.force_login(js)
+        response_js = self.client.get(reverse("home"))
+        content_js = response_js.content.decode()
+        self.assertIn(reverse("job_list"), content_js)
+        self.assertIn(reverse("jobseeker_application_list"), content_js)
+
+    def test_homepage_graceful_when_empty(self):
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("No Active Vacancies at This Moment", content)
+        self.assertEqual(response.context["stats"]["open_jobs"], 0)
+        self.assertEqual(response.context["stats"]["companies"], 0)
+        self.assertEqual(response.context["stats"]["categories"], 0)
+        self.assertEqual(response.context["stats"]["jobseekers"], 0)
+
+
+
+
