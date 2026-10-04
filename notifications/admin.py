@@ -32,4 +32,5 @@ class NotificationAdmin(admin.ModelAdmin):
         "recipient",
         "application",
     )
+    date_hierarchy = "created_at"
     ordering = ["-created_at"]

@@ -8,11 +8,20 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.models import Education, EmployerProfile, JobseekerProfile, Skill, User
-from applications.models import Application
+from accounts.models import (
+    CV,
+    Education,
+    EmployerProfile,
+    Experience,
+    JobseekerProfile,
+    Skill,
+    User,
+)
+from applications.models import Application, ApplicationStatusHistory, Interview
 from jobs.admin import CategoryAdmin, JobAdmin, LocationAdmin, SavedJobAdmin
 from jobs.forms import JobForm
 from jobs.models import Category, Job, Location, SavedJob
+from notifications.models import Notification
 
 
 def make_approved_employer(username="emp_approved", email="emp_app@example.com"):
@@ -3346,6 +3355,227 @@ class HomePagePolishTests(TestCase):
         self.assertEqual(response.context["stats"]["companies"], 0)
         self.assertEqual(response.context["stats"]["categories"], 0)
         self.assertEqual(response.context["stats"]["jobseekers"], 0)
+
+
+# =====================================================================
+# STEP 6.14D — DJANGO ADMIN / BACK-OFFICE POLISH REGRESSION TESTS
+# =====================================================================
+
+
+class AdminBackOfficePolishTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        # 1. Superuser / Staff
+        cls.admin_user = User.objects.create_superuser(
+            username="admin_staff",
+            email="admin@example.com",
+            password="AdminPassword123!",
+        )
+        # 2. Regular non-staff user
+        cls.jobseeker_user = User.objects.create_user(
+            username="regular_js",
+            email="regular@example.com",
+            password="JobseekerPass123!",
+            role=User.Role.JOBSEEKER,
+        )
+        cls.jobseeker_profile = JobseekerProfile.objects.create(
+            user=cls.jobseeker_user,
+            phone="9800000001",
+            location="Kathmandu",
+        )
+        cls.cv = CV.objects.create(
+            profile=cls.jobseeker_profile,
+            title="Standard Resume",
+            file="cvs/resume.pdf",
+            original_filename="resume.pdf",
+            is_default=True,
+            is_active=True,
+        )
+
+        # 3. Employer
+        cls.employer_user = User.objects.create_user(
+            username="test_emp_admin",
+            email="empadmin@example.com",
+            password="EmployerPass123!",
+            role=User.Role.EMPLOYER,
+        )
+        cls.employer_profile = EmployerProfile.objects.create(
+            user=cls.employer_user,
+            company_name="Apex Technologies",
+            industry="Software & IT",
+            phone="9800000002",
+            address="Lalitpur, Nepal",
+            verification_status=EmployerProfile.VerificationStatus.APPROVED,
+        )
+
+        # 4. Taxonomy
+        cls.category = Category.objects.create(
+            name="Engineering & IT",
+            slug="engineering-it",
+            is_active=True,
+        )
+        cls.location = Location.objects.create(
+            name="Kathmandu Valley",
+            slug="kathmandu-valley",
+            is_remote=False,
+        )
+
+        # 5. Job
+        cls.job = Job.objects.create(
+            employer=cls.employer_profile,
+            category=cls.category,
+            location=cls.location,
+            title="Senior Python Backend Developer",
+            description="Leading backend systems development.",
+            employment_type=Job.EmploymentType.FULL_TIME,
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=30),
+            published_at=timezone.now(),
+        )
+
+        # 6. Application & Status History
+        cls.application = Application.objects.create(
+            job=cls.job,
+            jobseeker=cls.jobseeker_profile,
+            cv=cls.cv,
+            status=Application.Status.INTERVIEW,
+            cover_letter="Passionate about Python and clean code.",
+        )
+        cls.status_history = ApplicationStatusHistory.objects.create(
+            application=cls.application,
+            old_status=Application.Status.APPLIED,
+            new_status=Application.Status.INTERVIEW,
+            changed_by=cls.employer_user,
+            notes="Selected for technical interview",
+        )
+
+        # 7. Interview
+        cls.interview = Interview.objects.create(
+            application=cls.application,
+            interview_type=Interview.InterviewType.VIDEO,
+            status=Interview.InterviewStatus.SCHEDULED,
+            scheduled_at=timezone.now() + timedelta(days=5),
+            duration_minutes=45,
+            location_or_link="https://meet.google.com/abc-defg-hij",
+            created_by=cls.employer_user,
+        )
+
+        # 8. SavedJob
+        cls.saved_job = SavedJob.objects.create(
+            jobseeker=cls.jobseeker_profile,
+            job=cls.job,
+        )
+
+        # 9. Notification
+        cls.notification = Notification.objects.create(
+            recipient=cls.jobseeker_user,
+            notification_type=Notification.NotificationType.APPLICATION_STATUS_CHANGED,
+            title="Application status updated",
+            message="Your application is now under interview stage.",
+        )
+
+    def test_important_models_remain_registered(self):
+        registered_models = [
+            User,
+            EmployerProfile,
+            JobseekerProfile,
+            CV,
+            Skill,
+            Education,
+            Experience,
+            Job,
+            Category,
+            Location,
+            SavedJob,
+            Application,
+            ApplicationStatusHistory,
+            Interview,
+            Notification,
+        ]
+        for model in registered_models:
+            with self.subTest(model=model.__name__):
+                self.assertIn(model, site._registry)
+
+    def test_non_staff_cannot_access_admin(self):
+        # Anonymous visitor
+        response = self.client.get(reverse("admin:index"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("admin:login"), response.url)
+
+        # Authenticated non-staff user
+        self.client.force_login(self.jobseeker_user)
+        response_auth = self.client.get(reverse("admin:index"))
+        self.assertEqual(response_auth.status_code, 302)
+        self.assertIn(reverse("admin:login"), response_auth.url)
+
+    def test_staff_user_can_access_admin_index(self):
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("admin:index"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_changelist_views_load_for_staff(self):
+        self.client.force_login(self.admin_user)
+        changelist_urls = [
+            reverse("admin:accounts_user_changelist"),
+            reverse("admin:accounts_employerprofile_changelist"),
+            reverse("admin:accounts_jobseekerprofile_changelist"),
+            reverse("admin:accounts_cv_changelist"),
+            reverse("admin:jobs_job_changelist"),
+            reverse("admin:jobs_category_changelist"),
+            reverse("admin:jobs_location_changelist"),
+            reverse("admin:jobs_savedjob_changelist"),
+            reverse("admin:applications_application_changelist"),
+            reverse("admin:applications_interview_changelist"),
+            reverse("admin:notifications_notification_changelist"),
+        ]
+        for url in changelist_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+
+    def test_admin_search_and_filter_functionality(self):
+        self.client.force_login(self.admin_user)
+
+        # Job search and filter
+        job_url = reverse("admin:jobs_job_changelist") + f"?q=Python&status={Job.Status.PUBLISHED}"
+        res_job = self.client.get(job_url)
+        self.assertEqual(res_job.status_code, 200)
+
+        # EmployerProfile search and filter
+        emp_url = reverse("admin:accounts_employerprofile_changelist") + f"?q=Apex&verification_status={EmployerProfile.VerificationStatus.APPROVED}"
+        res_emp = self.client.get(emp_url)
+        self.assertEqual(res_emp.status_code, 200)
+
+        # User search and filter
+        user_url = reverse("admin:accounts_user_changelist") + f"?q=staff&role={User.Role.JOBSEEKER}"
+        res_user = self.client.get(user_url)
+        self.assertEqual(res_user.status_code, 200)
+
+        # Application search and filter
+        app_url = reverse("admin:applications_application_changelist") + f"?q=Python&status={Application.Status.INTERVIEW}"
+        res_app = self.client.get(app_url)
+        self.assertEqual(res_app.status_code, 200)
+
+        # Interview search and filter
+        int_url = reverse("admin:applications_interview_changelist") + f"?q=Python&status={Interview.InterviewStatus.SCHEDULED}"
+        res_int = self.client.get(int_url)
+        self.assertEqual(res_int.status_code, 200)
+
+    def test_custom_admin_display_methods(self):
+        # 1. JobseekerProfileAdmin custom methods
+        js_admin = site._registry[JobseekerProfile]
+        self.assertEqual(js_admin.get_full_name(self.jobseeker_profile), "regular_js")
+        self.assertEqual(js_admin.get_email(self.jobseeker_profile), "regular@example.com")
+
+        # 2. JobAdmin is_open custom method
+        job_admin = site._registry[Job]
+        self.assertTrue(job_admin.is_open(self.job))
+        self.assertFalse(job_admin.is_open(None))
+
+        # 3. InterviewAdmin candidate and job methods
+        int_admin = site._registry[Interview]
+        self.assertEqual(int_admin.get_candidate(self.interview), "regular_js")
+        self.assertEqual(int_admin.get_job(self.interview), "Senior Python Backend Developer")
 
 
 

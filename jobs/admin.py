@@ -9,6 +9,7 @@ class CategoryAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("name",)
     prepopulated_fields = {"slug": ("name",)}
+    ordering = ("name",)
 
 
 @admin.register(Location)
@@ -17,6 +18,7 @@ class LocationAdmin(admin.ModelAdmin):
     list_filter = ("is_remote",)
     search_fields = ("name",)
     prepopulated_fields = {"slug": ("name",)}
+    ordering = ("name",)
 
 
 @admin.register(Job)
