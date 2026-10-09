@@ -19,8 +19,48 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse, resolve
+from django.views import View
+from django.views.generic import DetailView, FormView, TemplateView, UpdateView
 
 from .forms import EmployerProfileForm, EmployerVerificationForm
+from .views import (
+    CVDeleteView,
+    CVDownloadView,
+    CVListView,
+    CVSetDefaultView,
+    CompanyDetailView,
+    DashboardView,
+    EmployerDashboardView,
+    EmployerProfileEditView,
+    EmployerProfileView,
+    EmployerVerificationSubmitView,
+    JobseekerDashboardView,
+    ProfileEditView,
+    ProfileView,
+    RegisterChoiceView,
+    RegisterEmployerView,
+    RegisterJobseekerView,
+    SkillsEditView,
+    VerificationDocumentDownloadView,
+    company_detail,
+    cv_delete,
+    cv_download,
+    cv_list,
+    cv_set_default,
+    dashboard,
+    employer_dashboard,
+    employer_profile,
+    employer_profile_edit,
+    employer_verification_submit,
+    jobseeker_dashboard,
+    profile_edit,
+    profile_view,
+    register_choice,
+    register_employer,
+    register_jobseeker,
+    skills_edit,
+    verification_document_download,
+)
 from .models import (
     CV,
     MAX_ACTIVE_CVS,
@@ -2304,3 +2344,1047 @@ class Step613PublicCompanyExperienceTests(TestCase):
             self.assertEqual(len(response.context["jobs"]), 10)
 
 
+# ---------------------------------------------------------------------------
+# Step 6.16B: Reusable CBV Role-Based Access Mixins Tests
+# ---------------------------------------------------------------------------
+import sys
+import types
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
+from django.test import RequestFactory, override_settings
+from django.urls import path
+from django.views import View
+
+import config.urls
+from accounts.mixins import (
+    ApprovedEmployerRequiredMixin,
+    EmployerRequiredMixin,
+    JobseekerRequiredMixin,
+    StaffRequiredMixin,
+)
+
+
+class DummyJobseekerView(JobseekerRequiredMixin, View):
+    def get(self, request):
+        return HttpResponse("jobseeker ok")
+
+
+class DummyEmployerView(EmployerRequiredMixin, View):
+    def get(self, request):
+        return HttpResponse("employer ok")
+
+
+class DummyApprovedEmployerView(ApprovedEmployerRequiredMixin, View):
+    def get(self, request):
+        return HttpResponse("approved employer ok")
+
+
+class DummyStaffView(StaffRequiredMixin, View):
+    def get(self, request):
+        return HttpResponse("staff ok")
+
+
+_mixin_test_urlpatterns = list(config.urls.urlpatterns) + [
+    path("test-cbv/jobseeker/", DummyJobseekerView.as_view(), name="test_cbv_jobseeker"),
+    path("test-cbv/employer/", DummyEmployerView.as_view(), name="test_cbv_employer"),
+    path("test-cbv/approved-employer/", DummyApprovedEmployerView.as_view(), name="test_cbv_approved_employer"),
+    path("test-cbv/staff/", DummyStaffView.as_view(), name="test_cbv_staff"),
+]
+
+_mixin_test_urls_module = "accounts._test_cbv_urls"
+_mod = types.ModuleType(_mixin_test_urls_module)
+_mod.urlpatterns = _mixin_test_urlpatterns
+sys.modules[_mixin_test_urls_module] = _mod
+
+
+@override_settings(ROOT_URLCONF=_mixin_test_urls_module)
+class RoleBasedAccessMixinsTests(TestCase):
+    """Unit tests for Step 6.16B CBV role-based access mixins."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+        # Jobseeker
+        self.jobseeker = make_jobseeker(username="test_js_mixin", email="test_js_mixin@example.com")
+
+        # Employers with different verification states
+        self.employer_approved = User.objects.create_user(
+            username="test_emp_app", email="test_emp_app@example.com", password="Testpass123!",
+            role=User.Role.EMPLOYER,
+        )
+        self.profile_approved = EmployerProfile.objects.create(
+            user=self.employer_approved, company_name="Approved Co",
+            verification_status=EmployerProfile.VerificationStatus.APPROVED,
+        )
+
+        self.employer_pending = User.objects.create_user(
+            username="test_emp_pend", email="test_emp_pend@example.com", password="Testpass123!",
+            role=User.Role.EMPLOYER,
+        )
+        self.profile_pending = EmployerProfile.objects.create(
+            user=self.employer_pending, company_name="Pending Co",
+            verification_status=EmployerProfile.VerificationStatus.PENDING,
+        )
+
+        self.employer_rejected = User.objects.create_user(
+            username="test_emp_rej", email="test_emp_rej@example.com", password="Testpass123!",
+            role=User.Role.EMPLOYER,
+        )
+        self.profile_rejected = EmployerProfile.objects.create(
+            user=self.employer_rejected, company_name="Rejected Co",
+            verification_status=EmployerProfile.VerificationStatus.REJECTED,
+        )
+
+        # Employer without profile
+        self.employer_no_profile = User.objects.create_user(
+            username="test_emp_noprof", email="test_emp_noprof@example.com", password="Testpass123!",
+            role=User.Role.EMPLOYER,
+        )
+
+        # Staff user
+        self.staff_user = User.objects.create_user(
+            username="test_staff_mixin", email="test_staff_mixin@example.com", password="Testpass123!",
+            role=User.Role.JOBSEEKER, is_staff=True,
+        )
+
+        # Superuser
+        self.superuser = User.objects.create_superuser(
+            username="test_super_mixin", email="test_super_mixin@example.com", password="Testpass123!",
+        )
+
+    # -----------------------------------------------------------------------
+    # JobseekerRequiredMixin
+    # -----------------------------------------------------------------------
+    def test_jobseeker_mixin_anonymous_redirects_to_login(self):
+        response = self.client.get("/test-cbv/jobseeker/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/?next=/test-cbv/jobseeker/", response.headers["Location"])
+
+    def test_jobseeker_mixin_correct_role_access(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.get("/test-cbv/jobseeker/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"jobseeker ok")
+
+    def test_jobseeker_mixin_wrong_role_raises_403(self):
+        self.client.force_login(self.employer_approved)
+        response = self.client.get("/test-cbv/jobseeker/")
+        self.assertEqual(response.status_code, 403)
+
+    # -----------------------------------------------------------------------
+    # EmployerRequiredMixin
+    # -----------------------------------------------------------------------
+    def test_employer_mixin_anonymous_redirects_to_login(self):
+        response = self.client.get("/test-cbv/employer/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/?next=/test-cbv/employer/", response.headers["Location"])
+
+    def test_employer_mixin_correct_role_access(self):
+        self.client.force_login(self.employer_pending)
+        response = self.client.get("/test-cbv/employer/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"employer ok")
+
+    def test_employer_mixin_wrong_role_raises_403(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.get("/test-cbv/employer/")
+        self.assertEqual(response.status_code, 403)
+
+    # -----------------------------------------------------------------------
+    # ApprovedEmployerRequiredMixin
+    # -----------------------------------------------------------------------
+    def test_approved_employer_mixin_anonymous_redirects_to_login(self):
+        response = self.client.get("/test-cbv/approved-employer/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/?next=/test-cbv/approved-employer/", response.headers["Location"])
+
+    def test_approved_employer_mixin_non_employer_raises_403(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.get("/test-cbv/approved-employer/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_approved_employer_mixin_employer_without_profile_raises_403(self):
+        self.client.force_login(self.employer_no_profile)
+        response = self.client.get("/test-cbv/approved-employer/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_approved_employer_mixin_pending_employer_raises_403(self):
+        self.client.force_login(self.employer_pending)
+        response = self.client.get("/test-cbv/approved-employer/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_approved_employer_mixin_rejected_employer_raises_403(self):
+        self.client.force_login(self.employer_rejected)
+        response = self.client.get("/test-cbv/approved-employer/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_approved_employer_mixin_approved_employer_allowed(self):
+        self.client.force_login(self.employer_approved)
+        response = self.client.get("/test-cbv/approved-employer/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"approved employer ok")
+
+    # -----------------------------------------------------------------------
+    # StaffRequiredMixin
+    # -----------------------------------------------------------------------
+    def test_staff_mixin_anonymous_redirects_to_login(self):
+        response = self.client.get("/test-cbv/staff/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/?next=/test-cbv/staff/", response.headers["Location"])
+
+    def test_staff_mixin_non_staff_raises_403(self):
+        self.client.force_login(self.jobseeker)
+        response = self.client.get("/test-cbv/staff/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_mixin_staff_user_allowed(self):
+        self.client.force_login(self.staff_user)
+        response = self.client.get("/test-cbv/staff/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"staff ok")
+
+    def test_staff_mixin_superuser_allowed(self):
+        self.client.force_login(self.superuser)
+        response = self.client.get("/test-cbv/staff/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"staff ok")
+
+    # -----------------------------------------------------------------------
+    # Direct PermissionDenied Exception Verification (Unit-level)
+    # -----------------------------------------------------------------------
+    def test_mixins_raise_permission_denied_directly(self):
+        request = self.factory.get("/test-cbv/jobseeker/")
+        request.user = self.employer_approved
+        with self.assertRaises(PermissionDenied):
+            DummyJobseekerView.as_view()(request)
+
+        request = self.factory.get("/test-cbv/employer/")
+        request.user = self.jobseeker
+        with self.assertRaises(PermissionDenied):
+            DummyEmployerView.as_view()(request)
+
+        request = self.factory.get("/test-cbv/approved-employer/")
+        request.user = self.employer_pending
+        with self.assertRaises(PermissionDenied):
+            DummyApprovedEmployerView.as_view()(request)
+
+        request = self.factory.get("/test-cbv/staff/")
+        request.user = self.jobseeker
+        with self.assertRaises(PermissionDenied):
+            DummyStaffView.as_view()(request)
+
+
+class PublicAndRegistrationCBVTests(TestCase):
+    """
+    Regression test suite verifying CBV conversion for the four Accounts public/registration views:
+    RegisterChoiceView, RegisterJobseekerView, RegisterEmployerView, and CompanyDetailView.
+    """
+
+    def setUp(self):
+        self.approved_employer = make_employer("pub_app_emp", "pub_app_emp@example.com")
+        self.approved_profile = self.approved_employer.employer_profile
+        self.approved_profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.approved_profile.company_name = "Public Approved Tech"
+        self.approved_profile.save()
+
+        self.pending_employer = make_employer("pub_pend_emp", "pub_pend_emp@example.com")
+        self.pending_profile = self.pending_employer.employer_profile
+        self.pending_profile.verification_status = EmployerProfile.VerificationStatus.PENDING
+        self.pending_profile.save()
+
+        self.jobseeker = make_jobseeker("pub_js_user", "pub_js_user@example.com")
+
+    def test_cbv_class_hierarchy_and_url_resolution(self):
+        # Verify CBV subclasses
+        self.assertTrue(issubclass(RegisterChoiceView, TemplateView))
+        self.assertTrue(issubclass(RegisterJobseekerView, FormView))
+        self.assertTrue(issubclass(RegisterEmployerView, FormView))
+        self.assertTrue(issubclass(CompanyDetailView, DetailView))
+
+        # Verify callable aliases
+        self.assertTrue(callable(register_choice))
+        self.assertTrue(callable(register_jobseeker))
+        self.assertTrue(callable(register_employer))
+        self.assertTrue(callable(company_detail))
+
+        self.assertIs(register_choice.view_class, RegisterChoiceView)
+        self.assertIs(register_jobseeker.view_class, RegisterJobseekerView)
+        self.assertIs(register_employer.view_class, RegisterEmployerView)
+        self.assertIs(company_detail.view_class, CompanyDetailView)
+
+        # Verify URL resolution
+        self.assertIs(resolve(reverse("register")).func.view_class, RegisterChoiceView)
+        self.assertIs(resolve(reverse("register_jobseeker")).func.view_class, RegisterJobseekerView)
+        self.assertIs(resolve(reverse("register_employer")).func.view_class, RegisterEmployerView)
+        self.assertIs(resolve(reverse("company_detail", args=[self.approved_profile.pk])).func.view_class, CompanyDetailView)
+
+    def test_register_choice_view(self):
+        response = self.client.get(reverse("register"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "accounts/register_choice.html")
+        content = response.content.decode()
+        self.assertIn(reverse("register_jobseeker"), content)
+        self.assertIn(reverse("register_employer"), content)
+
+    def test_authenticated_user_redirected_from_registration(self):
+        self.client.force_login(self.jobseeker)
+        # Jobseeker registration redirect
+        res_js_get = self.client.get(reverse("register_jobseeker"))
+        self.assertEqual(res_js_get.status_code, 302)
+        self.assertRedirects(res_js_get, reverse("dashboard"), fetch_redirect_response=False)
+
+        res_js_post = self.client.post(reverse("register_jobseeker"), {})
+        self.assertEqual(res_js_post.status_code, 302)
+        self.assertRedirects(res_js_post, reverse("dashboard"), fetch_redirect_response=False)
+
+        # Employer registration redirect
+        res_emp_get = self.client.get(reverse("register_employer"))
+        self.assertEqual(res_emp_get.status_code, 302)
+        self.assertRedirects(res_emp_get, reverse("dashboard"), fetch_redirect_response=False)
+
+        res_emp_post = self.client.post(reverse("register_employer"), {})
+        self.assertEqual(res_emp_post.status_code, 302)
+        self.assertRedirects(res_emp_post, reverse("dashboard"), fetch_redirect_response=False)
+
+    def test_register_jobseeker_form_lifecycle(self):
+        # 1. GET returns 200 with form
+        res_get = self.client.get(reverse("register_jobseeker"))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, "accounts/register_jobseeker.html")
+        self.assertIn("form", res_get.context)
+
+        # 2. Invalid POST returns 200 with errors
+        res_invalid = self.client.post(reverse("register_jobseeker"), {"username": ""})
+        self.assertEqual(res_invalid.status_code, 200)
+        self.assertIn("form", res_invalid.context)
+        self.assertTrue(res_invalid.context["form"].errors)
+
+        # 3. Valid POST creates user & profile, logs in, sets message, redirects
+        payload = {
+            "username": "brandnewjobseeker",
+            "first_name": "First",
+            "last_name": "Last",
+            "email": "brandnewjs@example.com",
+            "password1": "Password123!",
+            "password2": "Password123!",
+        }
+        res_valid = self.client.post(reverse("register_jobseeker"), payload)
+        self.assertRedirects(res_valid, reverse("dashboard"), fetch_redirect_response=False)
+        user = User.objects.get(username="brandnewjobseeker")
+        self.assertTrue(user.is_jobseeker)
+        self.assertTrue(hasattr(user, "jobseeker_profile"))
+        messages = list(res_valid.wsgi_request._messages)
+        self.assertTrue(any("Account created. Welcome to NepalJobs!" in str(m) for m in messages))
+
+    def test_register_employer_form_lifecycle(self):
+        # 1. GET returns 200 with form
+        res_get = self.client.get(reverse("register_employer"))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, "accounts/register_employer.html")
+        self.assertIn("form", res_get.context)
+
+        # 2. Invalid POST returns 200 with errors
+        res_invalid = self.client.post(reverse("register_employer"), {"username": ""})
+        self.assertEqual(res_invalid.status_code, 200)
+        self.assertIn("form", res_invalid.context)
+        self.assertTrue(res_invalid.context["form"].errors)
+
+        # 3. Valid POST creates user & profile with pending status, logs in, sets message, redirects
+        payload = {
+            "username": "brandnewemployer",
+            "email": "brandnewemp@example.com",
+            "company_name": "Brand New Innovations",
+            "phone": "9800000001",
+            "address": "Baneshwor, Kathmandu",
+            "password1": "Password123!",
+            "password2": "Password123!",
+        }
+        res_valid = self.client.post(reverse("register_employer"), payload)
+        self.assertRedirects(res_valid, reverse("dashboard"), fetch_redirect_response=False)
+        user = User.objects.get(username="brandnewemployer")
+        self.assertTrue(user.is_employer)
+        self.assertTrue(hasattr(user, "employer_profile"))
+        self.assertEqual(user.employer_profile.company_name, "Brand New Innovations")
+        self.assertEqual(user.employer_profile.verification_status, EmployerProfile.VerificationStatus.PENDING)
+        messages = list(res_valid.wsgi_request._messages)
+        self.assertTrue(any("Company account created. It is pending admin approval." in str(m) for m in messages))
+
+    def test_company_detail_view_visibility_and_404(self):
+        # 1. Approved company returns 200 and context variables
+        url_app = reverse("company_detail", args=[self.approved_profile.pk])
+        res_app = self.client.get(url_app)
+        self.assertEqual(res_app.status_code, 200)
+        self.assertTemplateUsed(res_app, "accounts/company_detail.html")
+        self.assertEqual(res_app.context["company"], self.approved_profile)
+        self.assertIn("page_obj", res_app.context)
+        self.assertIn("jobs", res_app.context)
+        self.assertIn("open_jobs_count", res_app.context)
+        self.assertIn("saved_job_ids", res_app.context)
+
+        # 2. Pending company returns 404
+        url_pend = reverse("company_detail", args=[self.pending_profile.pk])
+        self.assertEqual(self.client.get(url_pend).status_code, 404)
+
+        # 3. Non-existent company returns 404
+        url_none = reverse("company_detail", args=[999999])
+        self.assertEqual(self.client.get(url_none).status_code, 404)
+
+
+class DashboardsAndProfileEditingCBVTests(TestCase):
+    """
+    Step 6.16E2a regression tests for Dashboards and Profile Editing CBVs:
+    - dashboard (DashboardView)
+    - jobseeker_dashboard (JobseekerDashboardView)
+    - employer_dashboard (EmployerDashboardView)
+    - employer_profile (EmployerProfileView)
+    - employer_profile_edit (EmployerProfileEditView)
+    - profile_view (ProfileView)
+    - profile_edit (ProfileEditView)
+    - skills_edit (SkillsEditView)
+    """
+
+    def setUp(self):
+        self.staff_user = User.objects.create_superuser(
+            username="adminuser",
+            email="adminuser@example.com",
+            password="Testpass123!",
+        )
+        self.employer_user = make_employer(
+            username="emp_owner",
+            email="emp_owner@example.com",
+            password="Testpass123!",
+        )
+        self.employer_profile = self.employer_user.employer_profile
+
+        self.other_employer_user = make_employer(
+            username="emp_other",
+            email="emp_other@example.com",
+            password="Testpass123!",
+        )
+
+        self.jobseeker_user = make_jobseeker(
+            username="js_owner",
+            email="js_owner@example.com",
+            password="Testpass123!",
+        )
+        self.jobseeker_profile = self.jobseeker_user.jobseeker_profile
+
+        self.other_jobseeker_user = make_jobseeker(
+            username="js_other",
+            email="js_other@example.com",
+            password="Testpass123!",
+        )
+
+    def test_cbv_classes_and_callable_aliases(self):
+        # 1. Class inheritance
+        self.assertTrue(issubclass(DashboardView, View))
+        self.assertTrue(issubclass(JobseekerDashboardView, TemplateView))
+        self.assertTrue(issubclass(EmployerDashboardView, TemplateView))
+        self.assertTrue(issubclass(EmployerProfileView, TemplateView))
+        self.assertTrue(issubclass(EmployerProfileEditView, UpdateView))
+        self.assertTrue(issubclass(ProfileView, TemplateView))
+        self.assertTrue(issubclass(ProfileEditView, UpdateView))
+        self.assertTrue(issubclass(SkillsEditView, FormView))
+
+        # 2. Callable aliases
+        self.assertTrue(callable(dashboard))
+        self.assertTrue(callable(jobseeker_dashboard))
+        self.assertTrue(callable(employer_dashboard))
+        self.assertTrue(callable(employer_profile))
+        self.assertTrue(callable(employer_profile_edit))
+        self.assertTrue(callable(profile_view))
+        self.assertTrue(callable(profile_edit))
+        self.assertTrue(callable(skills_edit))
+
+        self.assertIs(dashboard.view_class, DashboardView)
+        self.assertIs(jobseeker_dashboard.view_class, JobseekerDashboardView)
+        self.assertIs(employer_dashboard.view_class, EmployerDashboardView)
+        self.assertIs(employer_profile.view_class, EmployerProfileView)
+        self.assertIs(employer_profile_edit.view_class, EmployerProfileEditView)
+        self.assertIs(profile_view.view_class, ProfileView)
+        self.assertIs(profile_edit.view_class, ProfileEditView)
+        self.assertIs(skills_edit.view_class, SkillsEditView)
+
+        # 3. URL resolution to CBVs
+        self.assertIs(resolve(reverse("dashboard")).func.view_class, DashboardView)
+        self.assertIs(resolve(reverse("jobseeker_dashboard")).func.view_class, JobseekerDashboardView)
+        self.assertIs(resolve(reverse("employer_dashboard")).func.view_class, EmployerDashboardView)
+        self.assertIs(resolve(reverse("employer_profile")).func.view_class, EmployerProfileView)
+        self.assertIs(resolve(reverse("employer_profile_edit")).func.view_class, EmployerProfileEditView)
+        self.assertIs(resolve(reverse("profile")).func.view_class, ProfileView)
+        self.assertIs(resolve(reverse("profile_edit")).func.view_class, ProfileEditView)
+        self.assertIs(resolve(reverse("skills_edit")).func.view_class, SkillsEditView)
+
+        # 4. Deterministic identity with callable aliases
+        self.assertIs(resolve(reverse("dashboard")).func, dashboard)
+        self.assertIs(resolve(reverse("jobseeker_dashboard")).func, jobseeker_dashboard)
+        self.assertIs(resolve(reverse("employer_dashboard")).func, employer_dashboard)
+        self.assertIs(resolve(reverse("employer_profile")).func, employer_profile)
+        self.assertIs(resolve(reverse("employer_profile_edit")).func, employer_profile_edit)
+        self.assertIs(resolve(reverse("profile")).func, profile_view)
+        self.assertIs(resolve(reverse("profile_edit")).func, profile_edit)
+        self.assertIs(resolve(reverse("skills_edit")).func, skills_edit)
+
+    def test_dashboard_routing_and_access(self):
+        # Anonymous user redirects to login
+        res_anon = self.client.get(reverse("dashboard"))
+        self.assertEqual(res_anon.status_code, 302)
+        self.assertIn(reverse("login"), res_anon.url)
+
+        # Staff user redirects to admin:index
+        self.client.force_login(self.staff_user)
+        res_staff = self.client.get(reverse("dashboard"))
+        self.assertRedirects(res_staff, reverse("admin:index"), fetch_redirect_response=False)
+
+        # Employer user redirects to employer_dashboard
+        self.client.force_login(self.employer_user)
+        res_emp = self.client.get(reverse("dashboard"))
+        self.assertRedirects(res_emp, reverse("employer_dashboard"), fetch_redirect_response=False)
+
+        # Jobseeker user redirects to jobseeker_dashboard
+        self.client.force_login(self.jobseeker_user)
+        res_js = self.client.get(reverse("dashboard"))
+        self.assertRedirects(res_js, reverse("jobseeker_dashboard"), fetch_redirect_response=False)
+
+    def test_jobseeker_dashboard_access_and_context(self):
+        # Anonymous user redirects to login
+        res_anon = self.client.get(reverse("jobseeker_dashboard"))
+        self.assertEqual(res_anon.status_code, 302)
+        self.assertIn(reverse("login"), res_anon.url)
+
+        # Employer user gets 403 Forbidden
+        self.client.force_login(self.employer_user)
+        res_emp = self.client.get(reverse("jobseeker_dashboard"))
+        self.assertEqual(res_emp.status_code, 403)
+
+        # Jobseeker gets 200 OK with expected context variables
+        self.client.force_login(self.jobseeker_user)
+        res_js = self.client.get(reverse("jobseeker_dashboard"))
+        self.assertEqual(res_js.status_code, 200)
+        self.assertTemplateUsed(res_js, "accounts/jobseeker_dashboard.html")
+        expected_keys = [
+            "steps",
+            "done",
+            "total",
+            "percent",
+            "app_metrics",
+            "total_applications",
+            "under_review_count",
+            "interview_count",
+            "selected_count",
+            "recent_applications",
+            "upcoming_interviews",
+            "saved_jobs_count",
+            "recent_saved_jobs",
+            "today",
+        ]
+        for key in expected_keys:
+            self.assertIn(key, res_js.context)
+
+    def test_employer_dashboard_access_and_context(self):
+        # Anonymous user redirects to login
+        res_anon = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(res_anon.status_code, 302)
+        self.assertIn(reverse("login"), res_anon.url)
+
+        # Jobseeker user gets 403 Forbidden
+        self.client.force_login(self.jobseeker_user)
+        res_js = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(res_js.status_code, 403)
+
+        # Employer user gets 200 OK with expected context variables
+        self.client.force_login(self.employer_user)
+        res_emp = self.client.get(reverse("employer_dashboard"))
+        self.assertEqual(res_emp.status_code, 200)
+        self.assertTemplateUsed(res_emp, "accounts/employer_dashboard.html")
+        expected_keys = [
+            "profile",
+            "employer_profile",
+            "verification_status",
+            "is_approved",
+            "is_pending",
+            "is_rejected",
+            "rejection_reason",
+            "has_verification_document",
+            "can_post_jobs",
+            "jobs_count",
+            "active_jobs_count",
+            "pipeline_metrics",
+            "total_applicants",
+            "needs_review_count",
+            "screening_count",
+            "interview_count",
+            "hired_count",
+            "upcoming_interviews",
+            "recent_applicants",
+        ]
+        for key in expected_keys:
+            self.assertIn(key, res_emp.context)
+
+    def test_employer_profile_view_and_edit_lifecycle(self):
+        # Anonymous access redirects to login
+        self.client.logout()
+        res_view_anon = self.client.get(reverse("employer_profile"))
+        self.assertEqual(res_view_anon.status_code, 302)
+        res_edit_anon = self.client.get(reverse("employer_profile_edit"))
+        self.assertEqual(res_edit_anon.status_code, 302)
+
+        # Jobseeker access gets 403 Forbidden
+        self.client.force_login(self.jobseeker_user)
+        res_view_js = self.client.get(reverse("employer_profile"))
+        self.assertEqual(res_view_js.status_code, 403)
+        res_edit_js = self.client.get(reverse("employer_profile_edit"))
+        self.assertEqual(res_edit_js.status_code, 403)
+
+        # Employer profile view returns 200 OK and own profile
+        self.client.force_login(self.employer_user)
+        res_view = self.client.get(reverse("employer_profile"))
+        self.assertEqual(res_view.status_code, 200)
+        self.assertTemplateUsed(res_view, "accounts/employer_profile_view.html")
+        self.assertEqual(res_view.context["profile"], self.employer_profile)
+
+        # Employer profile edit GET returns 200 OK with form
+        res_edit_get = self.client.get(reverse("employer_profile_edit"))
+        self.assertEqual(res_edit_get.status_code, 200)
+        self.assertTemplateUsed(res_edit_get, "accounts/employer_profile_edit.html")
+        self.assertIn("form", res_edit_get.context)
+
+        # Invalid POST returns 200 with form errors
+        res_invalid = self.client.post(reverse("employer_profile_edit"), {"company_name": ""})
+        self.assertEqual(res_invalid.status_code, 200)
+        self.assertTrue(res_invalid.context["form"].errors)
+
+        # Valid POST updates company profile, sets message, redirects
+        payload = {
+            "company_name": "Updated Acme Corp",
+            "description": "Leading tech company in Nepal.",
+            "industry": "Technology",
+            "website": "https://example.com",
+            "address": "Pulchowk, Lalitpur",
+            "phone": "9800000000",
+        }
+        res_valid = self.client.post(reverse("employer_profile_edit"), payload)
+        self.assertRedirects(res_valid, reverse("employer_profile"), fetch_redirect_response=False)
+        self.employer_profile.refresh_from_db()
+        self.assertEqual(self.employer_profile.company_name, "Updated Acme Corp")
+        self.assertEqual(self.employer_profile.description, "Leading tech company in Nepal.")
+        self.assertEqual(self.employer_profile.address, "Pulchowk, Lalitpur")
+        messages = list(res_valid.wsgi_request._messages)
+        self.assertTrue(any("Company profile updated." in str(m) for m in messages))
+
+    def test_jobseeker_profile_view_and_edit_lifecycle(self):
+        # Anonymous access redirects to login
+        self.client.logout()
+        res_view_anon = self.client.get(reverse("profile"))
+        self.assertEqual(res_view_anon.status_code, 302)
+        res_edit_anon = self.client.get(reverse("profile_edit"))
+        self.assertEqual(res_edit_anon.status_code, 302)
+
+        # Employer access gets 403 Forbidden
+        self.client.force_login(self.employer_user)
+        res_view_emp = self.client.get(reverse("profile"))
+        self.assertEqual(res_view_emp.status_code, 403)
+        res_edit_emp = self.client.get(reverse("profile_edit"))
+        self.assertEqual(res_edit_emp.status_code, 403)
+
+        # Jobseeker profile view returns 200 OK with own profile and default_cv
+        self.client.force_login(self.jobseeker_user)
+        res_view = self.client.get(reverse("profile"))
+        self.assertEqual(res_view.status_code, 200)
+        self.assertTemplateUsed(res_view, "accounts/profile_view.html")
+        self.assertEqual(res_view.context["profile"], self.jobseeker_profile)
+        self.assertIn("default_cv", res_view.context)
+
+        # Jobseeker profile edit GET returns 200 OK with form
+        res_edit_get = self.client.get(reverse("profile_edit"))
+        self.assertEqual(res_edit_get.status_code, 200)
+        self.assertTemplateUsed(res_edit_get, "accounts/profile_edit.html")
+        self.assertIn("form", res_edit_get.context)
+
+        # Valid POST updates profile, sets message, redirects to profile
+        payload = {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "email": self.jobseeker_user.email,
+            "phone": "9812345678",
+            "location": "Kathmandu",
+            "summary": "Experienced full-stack engineer.",
+        }
+        res_valid = self.client.post(reverse("profile_edit"), payload)
+        self.assertRedirects(res_valid, reverse("profile"), fetch_redirect_response=False)
+        self.jobseeker_profile.refresh_from_db()
+        self.jobseeker_user.refresh_from_db()
+        self.assertEqual(self.jobseeker_user.first_name, "Jane")
+        self.assertEqual(self.jobseeker_user.last_name, "Doe")
+        self.assertEqual(self.jobseeker_profile.phone, "9812345678")
+        self.assertEqual(self.jobseeker_profile.location, "Kathmandu")
+        self.assertEqual(self.jobseeker_profile.summary, "Experienced full-stack engineer.")
+        messages = list(res_valid.wsgi_request._messages)
+        self.assertTrue(any("Profile updated." in str(m) for m in messages))
+
+    def test_skills_edit_lifecycle(self):
+        # Anonymous access redirects to login
+        self.client.logout()
+        res_anon = self.client.get(reverse("skills_edit"))
+        self.assertEqual(res_anon.status_code, 302)
+
+        # Employer access gets 403 Forbidden
+        self.client.force_login(self.employer_user)
+        res_emp = self.client.get(reverse("skills_edit"))
+        self.assertEqual(res_emp.status_code, 403)
+
+        # Jobseeker GET returns 200 with form and prefilled initial skills
+        s1 = Skill.objects.create(name="python")
+        self.jobseeker_profile.skills.add(s1)
+        self.client.force_login(self.jobseeker_user)
+        res_get = self.client.get(reverse("skills_edit"))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, "accounts/skills_edit.html")
+        self.assertIn("form", res_get.context)
+        self.assertEqual(res_get.context["form"].initial["skills"], "python")
+
+        # Invalid POST (more than MAX_SKILLS=20)
+        too_many_skills = ", ".join([f"Skill{i}" for i in range(25)])
+        res_invalid = self.client.post(reverse("skills_edit"), {"skills": too_many_skills})
+        self.assertEqual(res_invalid.status_code, 200)
+        self.assertTrue(res_invalid.context["form"].errors)
+
+        # Valid POST updates skills, sets message, redirects to profile
+        valid_skills = "Django, PostgreSQL, Docker"
+        res_valid = self.client.post(reverse("skills_edit"), {"skills": valid_skills})
+        self.assertRedirects(res_valid, reverse("profile"), fetch_redirect_response=False)
+        self.jobseeker_profile.refresh_from_db()
+        skill_names = set(self.jobseeker_profile.skills.values_list("name", flat=True))
+        self.assertEqual(skill_names, {"django", "postgresql", "docker"})
+        messages = list(res_valid.wsgi_request._messages)
+        self.assertTrue(any("Skills updated." in str(m) for m in messages))
+
+
+class VerificationAndCVOperationsCBVTests(TestCase):
+    """
+    Step 6.16E2b regression tests for Verification and CV Operations CBVs:
+    - employer_verification_submit (EmployerVerificationSubmitView)
+    - verification_document_download (VerificationDocumentDownloadView)
+    - cv_list (CVListView)
+    - cv_download (CVDownloadView)
+    - cv_set_default (CVSetDefaultView)
+    - cv_delete (CVDeleteView)
+    """
+
+    def setUp(self):
+        self.staff_user = User.objects.create_superuser(
+            username="admin_ver_cv",
+            email="admin_ver_cv@example.com",
+            password="Testpass123!",
+        )
+        self.employer_user = make_employer(
+            username="emp_ver_cv",
+            email="emp_ver_cv@example.com",
+            password="Testpass123!",
+        )
+        self.employer_profile = self.employer_user.employer_profile
+
+        self.other_employer_user = make_employer(
+            username="other_emp_cv",
+            email="other_emp_cv@example.com",
+            password="Testpass123!",
+        )
+
+        self.jobseeker_user = make_jobseeker(
+            username="js_ver_cv",
+            email="js_ver_cv@example.com",
+            password="Testpass123!",
+        )
+        self.jobseeker_profile = self.jobseeker_user.jobseeker_profile
+
+        self.other_jobseeker_user = make_jobseeker(
+            username="other_js_cv",
+            email="other_js_cv@example.com",
+            password="Testpass123!",
+        )
+        self.other_jobseeker_profile = self.other_jobseeker_user.jobseeker_profile
+
+    def test_cbv_classes_and_callable_aliases(self):
+        # 1. Class inheritance
+        self.assertTrue(issubclass(EmployerVerificationSubmitView, UpdateView))
+        self.assertTrue(issubclass(VerificationDocumentDownloadView, View))
+        self.assertTrue(issubclass(CVListView, View))
+        self.assertTrue(issubclass(CVDownloadView, View))
+        self.assertTrue(issubclass(CVSetDefaultView, View))
+        self.assertTrue(issubclass(CVDeleteView, View))
+
+        # 2. Callable aliases
+        self.assertTrue(callable(employer_verification_submit))
+        self.assertTrue(callable(verification_document_download))
+        self.assertTrue(callable(cv_list))
+        self.assertTrue(callable(cv_download))
+        self.assertTrue(callable(cv_set_default))
+        self.assertTrue(callable(cv_delete))
+
+        self.assertIs(employer_verification_submit.view_class, EmployerVerificationSubmitView)
+        self.assertIs(verification_document_download.view_class, VerificationDocumentDownloadView)
+        self.assertIs(cv_list.view_class, CVListView)
+        self.assertIs(cv_download.view_class, CVDownloadView)
+        self.assertIs(cv_set_default.view_class, CVSetDefaultView)
+        self.assertIs(cv_delete.view_class, CVDeleteView)
+
+        # 3. URL resolution to CBVs
+        self.assertIs(
+            resolve(reverse("employer_verification_submit")).func.view_class,
+            EmployerVerificationSubmitView,
+        )
+        self.assertIs(
+            resolve(reverse("verification_document_download", args=[1])).func.view_class,
+            VerificationDocumentDownloadView,
+        )
+        self.assertIs(resolve(reverse("cv_list")).func.view_class, CVListView)
+        self.assertIs(resolve(reverse("cv_download", args=[1])).func.view_class, CVDownloadView)
+        self.assertIs(resolve(reverse("cv_set_default", args=[1])).func.view_class, CVSetDefaultView)
+        self.assertIs(resolve(reverse("cv_delete", args=[1])).func.view_class, CVDeleteView)
+
+        # 4. Identity with callable aliases
+        self.assertIs(resolve(reverse("employer_verification_submit")).func, employer_verification_submit)
+        self.assertIs(
+            resolve(reverse("verification_document_download", args=[1])).func,
+            verification_document_download,
+        )
+        self.assertIs(resolve(reverse("cv_list")).func, cv_list)
+        self.assertIs(resolve(reverse("cv_download", args=[1])).func, cv_download)
+        self.assertIs(resolve(reverse("cv_set_default", args=[1])).func, cv_set_default)
+        self.assertIs(resolve(reverse("cv_delete", args=[1])).func, cv_delete)
+
+    def test_employer_verification_submit_permissions_and_lifecycle(self):
+        url = reverse("employer_verification_submit")
+
+        # 1. Anonymous redirected to login
+        res_anon = self.client.get(url)
+        self.assertEqual(res_anon.status_code, 302)
+        self.assertIn(reverse("login"), res_anon.url)
+
+        # 2. Jobseeker receives 403 Forbidden
+        self.client.force_login(self.jobseeker_user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        # 3. Approved employer redirected to employer_dashboard with message
+        self.employer_profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.employer_profile.save()
+        self.client.force_login(self.employer_user)
+        res_appr = self.client.get(url)
+        self.assertRedirects(res_appr, reverse("employer_dashboard"), fetch_redirect_response=False)
+        messages = list(res_appr.wsgi_request._messages)
+        self.assertTrue(any("Your company is already verified." in str(m) for m in messages))
+
+        # 4. Pending employer GET returns 200 with form and profile
+        self.employer_profile.verification_status = EmployerProfile.VerificationStatus.PENDING
+        self.employer_profile.save()
+        res_get = self.client.get(url)
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, "accounts/employer_verification.html")
+        self.assertIn("form", res_get.context)
+        self.assertEqual(res_get.context["profile"], self.employer_profile)
+
+        # 5. Invalid document upload returns 200 with form error
+        res_invalid = self.client.post(url, {})
+        self.assertEqual(res_invalid.status_code, 200)
+        self.assertTrue(res_invalid.context["form"].errors)
+
+        # 6. Valid document upload updates status to PENDING and redirects
+        self.employer_profile.verification_status = EmployerProfile.VerificationStatus.REJECTED
+        self.employer_profile.rejection_reason = "Blurry document"
+        self.employer_profile.save()
+
+        valid_pdf = make_pdf("legal_reg.pdf")
+        res_valid = self.client.post(url, {"verification_document": valid_pdf})
+        self.assertRedirects(res_valid, reverse("employer_dashboard"), fetch_redirect_response=False)
+        self.employer_profile.refresh_from_db()
+        self.assertEqual(self.employer_profile.verification_status, EmployerProfile.VerificationStatus.PENDING)
+        self.assertEqual(self.employer_profile.rejection_reason, "")
+        messages = list(res_valid.wsgi_request._messages)
+        self.assertTrue(any("Verification document submitted." in str(m) for m in messages))
+
+    def test_verification_document_download_permissions_and_security(self):
+        self.employer_profile.verification_document = make_pdf("company_cert.pdf")
+        self.employer_profile.save()
+        url = reverse("verification_document_download", args=[self.employer_profile.pk])
+
+        # 1. Anonymous redirected to login
+        self.client.logout()
+        res_anon = self.client.get(url)
+        self.assertEqual(res_anon.status_code, 302)
+        self.assertIn(reverse("login"), res_anon.url)
+
+        # 2. Jobseeker receives 403 Forbidden
+        self.client.force_login(self.jobseeker_user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        # 3. Non-staff employer (even the owner) receives 403 Forbidden
+        self.client.force_login(self.employer_user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        # 4. Staff downloads document successfully as FileResponse
+        self.client.force_login(self.staff_user)
+        res_staff = self.client.get(url)
+        self.assertEqual(res_staff.status_code, 200)
+        self.assertIsInstance(res_staff, FileResponse)
+
+        # 5. Non-existent profile returns 404
+        self.assertEqual(self.client.get(reverse("verification_document_download", args=[99999])).status_code, 404)
+
+        # 6. Employer without document returns 404
+        self.other_employer_user.employer_profile.verification_document = None
+        self.other_employer_user.employer_profile.save()
+        url_no_doc = reverse("verification_document_download", args=[self.other_employer_user.employer_profile.pk])
+        self.assertEqual(self.client.get(url_no_doc).status_code, 404)
+
+    def test_cv_list_and_upload_lifecycle(self):
+        url = reverse("cv_list")
+
+        # 1. Anonymous redirected to login
+        self.client.logout()
+        res_anon = self.client.get(url)
+        self.assertEqual(res_anon.status_code, 302)
+        self.assertIn(reverse("login"), res_anon.url)
+
+        # 2. Employer receives 403 Forbidden
+        self.client.force_login(self.employer_user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        # 3. Jobseeker GET returns 200 with isolated list
+        self.client.force_login(self.jobseeker_user)
+        res_get = self.client.get(url)
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, "accounts/cv_list.html")
+        self.assertIn("cvs", res_get.context)
+        self.assertIn("form", res_get.context)
+        self.assertEqual(res_get.context["max_cvs"], MAX_ACTIVE_CVS)
+
+        # 4. Valid upload creates CV and sets default
+        pdf = make_pdf("my_first_cv.pdf")
+        res_post = self.client.post(url, {"title": "Software Engineer Resume", "file": pdf})
+        self.assertRedirects(res_post, url, fetch_redirect_response=False)
+        self.assertEqual(self.jobseeker_profile.cvs.filter(is_active=True).count(), 1)
+        created_cv = self.jobseeker_profile.cvs.filter(is_active=True).first()
+        self.assertTrue(created_cv.is_default)
+        self.assertEqual(created_cv.original_filename, "my_first_cv.pdf")
+
+        # 5. MAX_ACTIVE_CVS limit enforcement
+        for i in range(MAX_ACTIVE_CVS - 1):
+            CV.objects.create(
+                profile=self.jobseeker_profile,
+                title=f"CV {i}",
+                file=make_pdf(f"cv_{i}.pdf"),
+                original_filename=f"cv_{i}.pdf",
+                is_active=True,
+                is_default=False,
+            )
+        self.assertEqual(self.jobseeker_profile.cvs.filter(is_active=True).count(), MAX_ACTIVE_CVS)
+
+        # Attempt to upload one more
+        extra_pdf = make_pdf("extra.pdf")
+        res_overflow = self.client.post(url, {"title": "Overflow CV", "file": extra_pdf})
+        self.assertEqual(res_overflow.status_code, 200)
+        self.assertEqual(self.jobseeker_profile.cvs.filter(is_active=True).count(), MAX_ACTIVE_CVS)
+        messages = list(res_overflow.wsgi_request._messages)
+        self.assertTrue(any(f"You can keep up to {MAX_ACTIVE_CVS} CVs" in str(m) for m in messages))
+
+    def test_cv_set_default_and_delete_post_only(self):
+        cv = CV.objects.create(
+            profile=self.jobseeker_profile,
+            title="CV To Manage",
+            file=make_pdf("manage.pdf"),
+            original_filename="manage.pdf",
+            is_active=True,
+            is_default=False,
+        )
+        url_default = reverse("cv_set_default", args=[cv.pk])
+        url_delete = reverse("cv_delete", args=[cv.pk])
+
+        self.client.force_login(self.jobseeker_user)
+
+        # 1. GET returns 405 Method Not Allowed
+        self.assertEqual(self.client.get(url_default).status_code, 405)
+        self.assertEqual(self.client.get(url_delete).status_code, 405)
+
+        # 2. Other jobseeker cannot set default or delete foreign CV (404)
+        self.client.force_login(self.other_jobseeker_user)
+        self.assertEqual(self.client.post(url_default).status_code, 404)
+        self.assertEqual(self.client.post(url_delete).status_code, 404)
+
+        # 3. Owner sets default
+        self.client.force_login(self.jobseeker_user)
+        res_default = self.client.post(url_default)
+        self.assertRedirects(res_default, reverse("cv_list"), fetch_redirect_response=False)
+        cv.refresh_from_db()
+        self.assertTrue(cv.is_default)
+
+        # 4. Owner deletes CV
+        res_del = self.client.post(url_delete)
+        self.assertRedirects(res_del, reverse("cv_list"), fetch_redirect_response=False)
+        cv.refresh_from_db()
+        self.assertFalse(cv.is_active)
+
+    def test_cv_download_authorization_matrix(self):
+        import datetime
+        from jobs.models import Category, Job, Location
+        from applications.models import Application
+
+        cv = CV.objects.create(
+            profile=self.jobseeker_profile,
+            title="Downloadable CV",
+            file=make_pdf("down.pdf"),
+            original_filename="down.pdf",
+            is_active=True,
+            is_default=True,
+        )
+        url = reverse("cv_download", args=[cv.pk])
+
+        # 1. Anonymous redirected to login
+        self.client.logout()
+        res_anon = self.client.get(url)
+        self.assertEqual(res_anon.status_code, 302)
+
+        # 2. Foreign jobseeker receives 403 Forbidden
+        self.client.force_login(self.other_jobseeker_user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        # 3. Unlinked employer receives 403 Forbidden
+        self.client.force_login(self.employer_user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        # 4. Owner jobseeker downloads successfully
+        self.client.force_login(self.jobseeker_user)
+        res_owner = self.client.get(url)
+        self.assertEqual(res_owner.status_code, 200)
+        self.assertIsInstance(res_owner, FileResponse)
+
+        # 5. Staff downloads successfully
+        self.client.force_login(self.staff_user)
+        res_staff = self.client.get(url)
+        self.assertEqual(res_staff.status_code, 200)
+
+        # 6. Approved employer with an application linking this CV can download
+        self.employer_profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.employer_profile.save()
+
+        cat, _ = Category.objects.get_or_create(name="Tech", defaults={"slug": "tech"})
+        loc, _ = Location.objects.get_or_create(name="Kathmandu", defaults={"slug": "ktm"})
+        job = Job.objects.create(
+            employer=self.employer_profile,
+            category=cat,
+            location=loc,
+            title="Software Developer",
+            description="Build systems",
+            application_deadline=datetime.date.today() + datetime.timedelta(days=15),
+            status=Job.Status.PUBLISHED,
+        )
+        Application.objects.create(
+            job=job,
+            jobseeker=self.jobseeker_profile,
+            cv=cv,
+            status=Application.Status.APPLIED,
+        )
+
+        self.client.force_login(self.employer_user)
+        res_app_emp = self.client.get(url)
+        self.assertEqual(res_app_emp.status_code, 200)
+        self.assertIsInstance(res_app_emp, FileResponse)

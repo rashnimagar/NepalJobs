@@ -9,8 +9,10 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
+from django.views import View
+
 
 from accounts.models import (
     CV,
@@ -33,6 +35,28 @@ from applications.forms import (
 )
 from applications.models import Application, ApplicationStatusHistory, Interview
 from jobs.models import Category, Job, Location
+from applications.views import (
+    ApplyJobView,
+    JobseekerApplicationListView,
+    JobseekerApplicationDetailView,
+    EmployerJobApplicantsView,
+    EmployerAllApplicantsView,
+    EmployerApplicationDetailView,
+    EmployerScheduleInterviewView,
+    EmployerEditInterviewView,
+    EmployerCancelInterviewView,
+    EmployerCompleteInterviewView,
+    apply_job,
+    jobseeker_application_list,
+    jobseeker_application_detail,
+    employer_job_applicants,
+    employer_all_applicants,
+    employer_application_detail,
+    employer_schedule_interview,
+    employer_edit_interview,
+    employer_cancel_interview,
+    employer_complete_interview,
+)
 
 User = get_user_model()
 
@@ -2703,3 +2727,360 @@ class ApplicationConfirmationAndUXPolishTests(TestCase):
         self.assertIn('id="submit-application-btn"', content)
         self.assertIn("isSubmitting", content)
         self.assertIn("aria-label", content)
+
+
+class ApplicationsAndInterviewLifecycleCBVTests(TempMediaTestCase):
+    """
+    Step 6.16F regression tests for Applications and Interview Lifecycle CBVs:
+    - apply_job (ApplyJobView)
+    - jobseeker_application_list (JobseekerApplicationListView)
+    - jobseeker_application_detail (JobseekerApplicationDetailView)
+    - employer_job_applicants (EmployerJobApplicantsView)
+    - employer_all_applicants (EmployerAllApplicantsView)
+    - employer_application_detail (EmployerApplicationDetailView)
+    - employer_schedule_interview (EmployerScheduleInterviewView)
+    - employer_edit_interview (EmployerEditInterviewView)
+    - employer_cancel_interview (EmployerCancelInterviewView)
+    - employer_complete_interview (EmployerCompleteInterviewView)
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Candidate 1 (with CV)
+        self.candidate = make_jobseeker(username="cbv_cand", email="cbv_cand@example.com")
+        self.candidate_profile = self.candidate.jobseeker_profile
+        self.cv = CV.objects.create(
+            profile=self.candidate_profile,
+            title="Master Resume",
+            file=make_pdf("master.pdf"),
+            original_filename="master.pdf",
+            is_active=True,
+            is_default=True,
+        )
+
+        # Other Candidate
+        self.other_candidate = make_jobseeker(username="cbv_other_cand", email="cbv_other_cand@example.com")
+        self.other_candidate_profile = self.other_candidate.jobseeker_profile
+
+        # Approved Employer A
+        self.employer_a = make_employer(username="cbv_emp_a", email="cbv_emp_a@example.com", company_name="Emp A Corp")
+        self.employer_a_profile = self.employer_a.employer_profile
+
+        # Approved Employer B
+        self.employer_b = make_employer(username="cbv_emp_b", email="cbv_emp_b@example.com", company_name="Emp B Corp")
+        self.employer_b_profile = self.employer_b.employer_profile
+
+        # Unapproved / Pending Employer
+        self.pending_employer = make_employer(
+            username="cbv_pending_emp",
+            email="cbv_pending_emp@example.com",
+            verification_status=EmployerProfile.VerificationStatus.PENDING,
+        )
+
+        # Published Job owned by Employer A
+        self.job_a = create_job(self.employer_a_profile, title="Fullstack Engineer", status=Job.Status.PUBLISHED)
+
+        # Published Job owned by Employer B
+        self.job_b = create_job(self.employer_b_profile, title="DevOps Engineer", status=Job.Status.PUBLISHED)
+
+        # Application submitted by Candidate to Job A
+        self.application = Application.objects.create(
+            job=self.job_a,
+            jobseeker=self.candidate_profile,
+            cv=self.cv,
+            status=Application.Status.APPLIED,
+        )
+
+    def test_cbv_classes_and_callable_aliases(self):
+        # 1. Class inheritance
+        cbv_classes = [
+            ApplyJobView,
+            JobseekerApplicationListView,
+            JobseekerApplicationDetailView,
+            EmployerJobApplicantsView,
+            EmployerAllApplicantsView,
+            EmployerApplicationDetailView,
+            EmployerScheduleInterviewView,
+            EmployerEditInterviewView,
+            EmployerCancelInterviewView,
+            EmployerCompleteInterviewView,
+        ]
+        for cls in cbv_classes:
+            self.assertTrue(issubclass(cls, View))
+
+        # 2. Callable aliases
+        aliases = [
+            (apply_job, ApplyJobView),
+            (jobseeker_application_list, JobseekerApplicationListView),
+            (jobseeker_application_detail, JobseekerApplicationDetailView),
+            (employer_job_applicants, EmployerJobApplicantsView),
+            (employer_all_applicants, EmployerAllApplicantsView),
+            (employer_application_detail, EmployerApplicationDetailView),
+            (employer_schedule_interview, EmployerScheduleInterviewView),
+            (employer_edit_interview, EmployerEditInterviewView),
+            (employer_cancel_interview, EmployerCancelInterviewView),
+            (employer_complete_interview, EmployerCompleteInterviewView),
+        ]
+        for alias, cls in aliases:
+            self.assertTrue(callable(alias))
+            self.assertIs(alias.view_class, cls)
+
+        # 3. URL resolution and identity
+        routes = [
+            (reverse("apply_job", args=[self.job_a.pk]), ApplyJobView, apply_job),
+            (reverse("jobseeker_application_list"), JobseekerApplicationListView, jobseeker_application_list),
+            (reverse("jobseeker_application_detail", args=[self.application.pk]), JobseekerApplicationDetailView, jobseeker_application_detail),
+            (reverse("employer_job_applicants", args=[self.job_a.pk]), EmployerJobApplicantsView, employer_job_applicants),
+            (reverse("employer_all_applicants"), EmployerAllApplicantsView, employer_all_applicants),
+            (reverse("employer_application_detail", args=[self.application.pk]), EmployerApplicationDetailView, employer_application_detail),
+            (reverse("employer_schedule_interview", args=[self.application.pk]), EmployerScheduleInterviewView, employer_schedule_interview),
+            (reverse("employer_edit_interview", args=[1]), EmployerEditInterviewView, employer_edit_interview),
+            (reverse("employer_cancel_interview", args=[1]), EmployerCancelInterviewView, employer_cancel_interview),
+            (reverse("employer_complete_interview", args=[1]), EmployerCompleteInterviewView, employer_complete_interview),
+        ]
+        for url, cls, alias in routes:
+            resolver_match = resolve(url)
+            self.assertIs(resolver_match.func.view_class, cls)
+            self.assertIs(resolver_match.func, alias)
+
+    def test_jobseeker_views_permissions_and_cross_user_isolation(self):
+        # 1. Anonymous access redirects to login
+        urls = [
+            reverse("apply_job", args=[self.job_a.pk]),
+            reverse("jobseeker_application_list"),
+            reverse("jobseeker_application_detail", args=[self.application.pk]),
+        ]
+        for url in urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn(reverse("login"), response.url)
+
+        # 2. Employer access forbidden (403)
+        self.client.force_login(self.employer_a)
+        for url in urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 403)
+
+        # 3. Cross-candidate isolation on application detail (404)
+        self.client.force_login(self.other_candidate)
+        res_cross = self.client.get(reverse("jobseeker_application_detail", args=[self.application.pk]))
+        self.assertEqual(res_cross.status_code, 404)
+
+        # 4. Owner candidate gets 200
+        self.client.force_login(self.candidate)
+        res_owner = self.client.get(reverse("jobseeker_application_detail", args=[self.application.pk]))
+        self.assertEqual(res_owner.status_code, 200)
+
+    def test_employer_views_permissions_and_isolation(self):
+        # 1. Anonymous access redirects to login
+        emp_urls = [
+            reverse("employer_job_applicants", args=[self.job_a.pk]),
+            reverse("employer_all_applicants"),
+            reverse("employer_application_detail", args=[self.application.pk]),
+            reverse("employer_schedule_interview", args=[self.application.pk]),
+        ]
+        for url in emp_urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn(reverse("login"), response.url)
+
+        # 2. Jobseeker access forbidden (403)
+        self.client.force_login(self.candidate)
+        for url in emp_urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 403)
+
+        # 3. Unapproved employer forbidden (403)
+        self.client.force_login(self.pending_employer)
+        for url in emp_urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 403)
+
+        # 4. Cross-employer isolation (404)
+        self.client.force_login(self.employer_b)
+        self.assertEqual(self.client.get(reverse("employer_job_applicants", args=[self.job_a.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("employer_application_detail", args=[self.application.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("employer_schedule_interview", args=[self.application.pk])).status_code, 404)
+
+        # 5. Owner employer gets 200
+        self.client.force_login(self.employer_a)
+        self.assertEqual(self.client.get(reverse("employer_job_applicants", args=[self.job_a.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("employer_all_applicants")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("employer_application_detail", args=[self.application.pk])).status_code, 200)
+
+    def test_interview_http_method_restrictions(self):
+        interview = Interview.objects.create(
+            application=self.application,
+            created_by=self.employer_a,
+            interview_type=Interview.InterviewType.VIDEO,
+            scheduled_at=timezone.now() + timedelta(days=2),
+            duration_minutes=30,
+            status=Interview.InterviewStatus.SCHEDULED,
+        )
+        url_cancel = reverse("employer_cancel_interview", args=[interview.pk])
+        url_complete = reverse("employer_complete_interview", args=[interview.pk])
+
+        self.client.force_login(self.employer_a)
+
+        # GET requests must receive HTTP 405 Method Not Allowed
+        self.assertEqual(self.client.get(url_cancel).status_code, 405)
+        self.assertEqual(self.client.get(url_complete).status_code, 405)
+
+    def test_apply_job_lifecycle_and_prerequisites(self):
+        # 1. Candidate without active CV cannot apply
+        self.cv.is_active = False
+        self.cv.save()
+        self.client.force_login(self.candidate)
+        res_no_cv = self.client.get(reverse("apply_job", args=[self.job_b.pk]))
+        self.assertRedirects(res_no_cv, reverse("cv_list"), fetch_redirect_response=False)
+
+        # Restore active CV
+        self.cv.is_active = True
+        self.cv.save()
+
+        # 2. Closed job cannot be applied to
+        self.job_b.status = Job.Status.CLOSED
+        self.job_b.save()
+        res_closed = self.client.get(reverse("apply_job", args=[self.job_b.pk]))
+        self.assertRedirects(res_closed, reverse("job_list"), fetch_redirect_response=False)
+
+        # 3. Already applied job redirects to application detail
+        res_already = self.client.get(reverse("apply_job", args=[self.job_a.pk]))
+        self.assertRedirects(
+            res_already,
+            reverse("jobseeker_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+
+    def test_application_transition_and_private_notes_protection(self):
+        self.client.force_login(self.employer_a)
+        url = reverse("employer_application_detail", args=[self.application.pk])
+
+        # Transition APPLIED -> UNDER_REVIEW with internal notes
+        res_post = self.client.post(url, {
+            "status": Application.Status.UNDER_REVIEW,
+            "notes": "CONFIDENTIAL: Strong background in Python.",
+        })
+        self.assertRedirects(res_post, url, fetch_redirect_response=False)
+        self.application.refresh_from_db()
+        self.assertEqual(self.application.status, Application.Status.UNDER_REVIEW)
+
+        # Verify candidate cannot see confidential employer notes
+        self.client.force_login(self.candidate)
+        res_candidate = self.client.get(reverse("jobseeker_application_detail", args=[self.application.pk]))
+        self.assertEqual(res_candidate.status_code, 200)
+        content = res_candidate.content.decode()
+        self.assertNotIn("CONFIDENTIAL", content)
+        self.assertNotIn("Strong background in Python", content)
+
+    def test_interview_lifecycle_scheduling_collision_edit_cancel_complete(self):
+        # 1. Cannot schedule interview when application is in APPLIED status
+        url_sched = reverse("employer_schedule_interview", args=[self.application.pk])
+        self.client.force_login(self.employer_a)
+        res_applied_sched = self.client.get(url_sched)
+        self.assertRedirects(
+            res_applied_sched,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+
+        # Advance application to SHORTLISTED
+        self.application.transition_to(Application.Status.UNDER_REVIEW, changed_by=self.employer_a)
+        self.application.transition_to(Application.Status.SHORTLISTED, changed_by=self.employer_a)
+
+        # 2. Schedule interview
+        res_sched_post = self.client.post(url_sched, {
+            "interview_type": Interview.InterviewType.VIDEO,
+            "scheduled_at": (timezone.now() + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M"),
+            "duration_minutes": 45,
+            "location_or_link": "https://meet.google.com/test-room",
+            "candidate_instructions": "Please join 5 mins early.",
+            "internal_notes": "Focus on system design.",
+        })
+        self.assertRedirects(
+            res_sched_post,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+        self.application.refresh_from_db()
+        self.assertEqual(self.application.status, Application.Status.INTERVIEW)
+        self.assertEqual(self.application.interviews.count(), 1)
+        interview = self.application.interviews.first()
+        self.assertEqual(interview.status, Interview.InterviewStatus.SCHEDULED)
+        self.assertEqual(interview.location_or_link, "https://meet.google.com/test-room")
+
+        # 3. Collision / Duplicate active interview prevention
+        res_dup = self.client.get(url_sched)
+        self.assertRedirects(
+            res_dup,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+
+        # 4. Reschedule / Edit interview
+        url_edit = reverse("employer_edit_interview", args=[interview.pk])
+        res_edit_post = self.client.post(url_edit, {
+            "interview_type": Interview.InterviewType.IN_PERSON,
+            "scheduled_at": (timezone.now() + timedelta(days=4)).strftime("%Y-%m-%dT%H:%M"),
+            "duration_minutes": 60,
+            "location_or_link": "Kathmandu Office Floor 3",
+            "candidate_instructions": "Bring original ID.",
+            "internal_notes": "Senior panel joining.",
+        })
+        self.assertRedirects(
+            res_edit_post,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+        interview.refresh_from_db()
+        self.assertEqual(interview.interview_type, Interview.InterviewType.IN_PERSON)
+        self.assertEqual(interview.location_or_link, "Kathmandu Office Floor 3")
+
+        # 5. Cancel interview
+        url_cancel = reverse("employer_cancel_interview", args=[interview.pk])
+        res_cancel = self.client.post(url_cancel)
+        self.assertRedirects(
+            res_cancel,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+        interview.refresh_from_db()
+        self.assertEqual(interview.status, Interview.InterviewStatus.CANCELLED)
+
+        # 6. Cannot cancel already cancelled interview
+        res_cancel_again = self.client.post(url_cancel)
+        self.assertRedirects(
+            res_cancel_again,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+
+        # 7. Schedule new interview and mark as completed
+        res_sched_new = self.client.post(url_sched, {
+            "interview_type": Interview.InterviewType.VIDEO,
+            "scheduled_at": (timezone.now() + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M"),
+            "duration_minutes": 30,
+            "location_or_link": "https://meet.google.com/final-round",
+            "candidate_instructions": "Final round.",
+            "internal_notes": "Culture fit.",
+        })
+        self.assertRedirects(
+            res_sched_new,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+        new_interview = self.application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).first()
+        self.assertIsNotNone(new_interview)
+
+        url_complete = reverse("employer_complete_interview", args=[new_interview.pk])
+        res_complete = self.client.post(url_complete, {
+            "outcome_notes": "Candidate performed well, recommend for hire.",
+        })
+        self.assertRedirects(
+            res_complete,
+            reverse("employer_application_detail", args=[self.application.pk]),
+            fetch_redirect_response=False,
+        )
+        new_interview.refresh_from_db()
+        self.assertEqual(new_interview.status, Interview.InterviewStatus.COMPLETED)
+        self.assertIn("recommend for hire", new_interview.internal_notes)

@@ -1,12 +1,11 @@
 from urllib.parse import urlsplit
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.core.paginator import Paginator
-from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views import View
+from django.views.generic import ListView
 
 from .models import Notification
 
@@ -28,52 +27,68 @@ def is_safe_internal_url(url):
     return not parsed.scheme and not parsed.netloc
 
 
-@login_required
-def notification_list(request):
+class NotificationListView(LoginRequiredMixin, ListView):
     """
     Displays the authenticated user's notifications, ordered newest first with pagination.
     """
-    notifications_qs = request.user.notifications.select_related("application", "application__job").order_by("-created_at")
 
-    paginator = Paginator(notifications_qs, PAGE_SIZE)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
+    model = Notification
+    template_name = "notifications/notification_list.html"
+    context_object_name = "notifications"
+    paginate_by = PAGE_SIZE
 
-    return render(
-        request,
-        "notifications/notification_list.html",
-        {
-            "page_obj": page_obj,
-            "notifications": page_obj.object_list,
-        },
-    )
+    def get_queryset(self):
+        return (
+            self.request.user.notifications
+            .select_related("application", "application__job")
+            .order_by("-created_at")
+        )
+
+    def paginate_queryset(self, queryset, page_size):
+        paginator = self.get_paginator(
+            queryset,
+            page_size,
+            orphans=self.get_paginate_orphans(),
+            allow_empty_first_page=self.get_allow_empty(),
+        )
+        page_kwarg = self.page_kwarg
+        page_number = self.kwargs.get(page_kwarg) or self.request.GET.get(page_kwarg)
+        page = paginator.get_page(page_number)
+        return (paginator, page, page.object_list, page.has_other_pages())
 
 
-@login_required
-def notification_read_and_redirect(request, pk):
+class NotificationReadAndRedirectView(LoginRequiredMixin, View):
     """
     Marks the notification as read and redirects safely to its internal target URL.
     Scoped strictly to the authenticated recipient.
     """
-    notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
-    notification.mark_as_read()
 
-    target_url = notification.target_url
-    if is_safe_internal_url(target_url):
-        return redirect(target_url)
+    def get(self, request, pk, *args, **kwargs):
+        notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
+        notification.mark_as_read()
 
-    return redirect("notification_list")
+        target_url = notification.target_url
+        if is_safe_internal_url(target_url):
+            return redirect(target_url)
+
+        return redirect("notification_list")
 
 
-@login_required
-@require_POST
-def notification_mark_all_read(request):
+class NotificationMarkAllReadView(LoginRequiredMixin, View):
     """
     Marks all unread notifications for the authenticated user as read.
     """
-    request.user.notifications.filter(is_read=False).update(
-        is_read=True,
-        read_at=timezone.now(),
-    )
-    messages.success(request, "All notifications marked as read.")
-    return redirect("notification_list")
+
+    def post(self, request, *args, **kwargs):
+        request.user.notifications.filter(is_read=False).update(
+            is_read=True,
+            read_at=timezone.now(),
+        )
+        messages.success(request, "All notifications marked as read.")
+        return redirect("notification_list")
+
+
+# Backward-compatible function aliases
+notification_list = NotificationListView.as_view()
+notification_read_and_redirect = NotificationReadAndRedirectView.as_view()
+notification_mark_all_read = NotificationMarkAllReadView.as_view()

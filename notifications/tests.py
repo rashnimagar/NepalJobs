@@ -2,9 +2,10 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 
 from accounts.models import CV, EmployerProfile, JobseekerProfile
@@ -774,3 +775,63 @@ class NotificationCenterUITests(TestCase):
         self.assertEqual(response2.status_code, 200)
         self.assertContains(response2, "Page 2 of 2")
         self.assertEqual(len(response2.context["notifications"]), 5)
+
+
+class NotificationCBVRegressionTests(TestCase):
+    """Focused regression tests verifying CBV classes and contract preservation."""
+
+    def setUp(self):
+        self.user = make_jobseeker(username="cbv_cand", email="cbv_cand@example.com")
+
+    def test_cbv_classes_resolved(self):
+        from notifications.views import (
+            NotificationListView,
+            NotificationMarkAllReadView,
+            NotificationReadAndRedirectView,
+        )
+
+        match_list = resolve(reverse("notification_list"))
+        self.assertEqual(match_list.func.view_class, NotificationListView)
+
+        match_redirect = resolve(reverse("notification_read_and_redirect", kwargs={"pk": 1}))
+        self.assertEqual(match_redirect.func.view_class, NotificationReadAndRedirectView)
+
+        match_mark = resolve(reverse("notification_mark_all_read"))
+        self.assertEqual(match_mark.func.view_class, NotificationMarkAllReadView)
+
+    def test_anonymous_redirect_on_all_notification_endpoints(self):
+        login_url = reverse("login")
+
+        # GET notification_list
+        res_list = self.client.get(reverse("notification_list"))
+        self.assertEqual(res_list.status_code, 302)
+        self.assertIn(login_url, res_list.headers["Location"])
+
+        # GET notification_read_and_redirect
+        res_redir = self.client.get(reverse("notification_read_and_redirect", kwargs={"pk": 999}))
+        self.assertEqual(res_redir.status_code, 302)
+        self.assertIn(login_url, res_redir.headers["Location"])
+
+        # POST notification_mark_all_read
+        res_mark_post = self.client.post(reverse("notification_mark_all_read"))
+        self.assertEqual(res_mark_post.status_code, 302)
+        self.assertIn(login_url, res_mark_post.headers["Location"])
+
+        # GET notification_mark_all_read
+        res_mark_get = self.client.get(reverse("notification_mark_all_read"))
+        self.assertEqual(res_mark_get.status_code, 302)
+        self.assertIn(login_url, res_mark_get.headers["Location"])
+
+    def test_mark_all_read_sets_success_message(self):
+        Notification.objects.create(
+            recipient=self.user,
+            notification_type=Notification.NotificationType.APPLICATION_SUBMITTED,
+            title="Msg",
+            message="Content",
+            is_read=False,
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("notification_mark_all_read"), follow=True)
+        self.assertEqual(response.status_code, 200)
+        messages_list = list(get_messages(response.wsgi_request))
+        self.assertTrue(any("All notifications marked as read." in str(m) for m in messages_list))

@@ -5,9 +5,16 @@ from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_POST
+from django.views import View
+from django.views.generic import (
+    CreateView,
+    DetailView,
+    ListView,
+    TemplateView,
+    UpdateView,
+)
 
-from accounts.decorators import approved_employer_required, jobseeker_required
+from accounts.mixins import ApprovedEmployerRequiredMixin, JobseekerRequiredMixin
 from accounts.models import EmployerProfile, JobseekerProfile
 from jobs.forms import JobForm
 from jobs.models import Category, Job, Location, SavedJob
@@ -15,327 +22,402 @@ from jobs.models import Category, Job, Location, SavedJob
 PAGE_SIZE = 10
 
 
-def home(request):
-    today = timezone.localdate()
+class HomeView(TemplateView):
+    template_name = "home.html"
 
-    categories = (
-        Category.objects.filter(is_active=True)
-        .annotate(
-            open_jobs_count=Count(
-                "jobs",
-                filter=Q(
-                    jobs__status=Job.Status.PUBLISHED,
-                    jobs__application_deadline__gte=today,
-                    jobs__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
-                ),
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        today = timezone.localdate()
+
+        categories = (
+            Category.objects.filter(is_active=True)
+            .annotate(
+                open_jobs_count=Count(
+                    "jobs",
+                    filter=Q(
+                        jobs__status=Job.Status.PUBLISHED,
+                        jobs__application_deadline__gte=today,
+                        jobs__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
+                    ),
+                )
             )
+            .order_by("-open_jobs_count", "name")[:8]
         )
-        .order_by("-open_jobs_count", "name")[:8]
-    )
 
-    recent_jobs = (
-        Job.objects.open_jobs()
-        .select_related("employer", "category", "location")
-        .prefetch_related("required_skills")
-        .order_by("-published_at", "-created_at")[:6]
-    )
+        recent_jobs = (
+            Job.objects.open_jobs()
+            .select_related("employer", "category", "location")
+            .prefetch_related("required_skills")
+            .order_by("-published_at", "-created_at")[:6]
+        )
 
-    stats = {
-        "open_jobs": Job.objects.open_jobs().count(),
-        "companies": EmployerProfile.objects.filter(
-            verification_status=EmployerProfile.VerificationStatus.APPROVED
-        ).count(),
-        "categories": Category.objects.filter(is_active=True).count(),
-        "jobseekers": JobseekerProfile.objects.count(),
-    }
+        stats = {
+            "open_jobs": Job.objects.open_jobs().count(),
+            "companies": EmployerProfile.objects.filter(
+                verification_status=EmployerProfile.VerificationStatus.APPROVED
+            ).count(),
+            "categories": Category.objects.filter(is_active=True).count(),
+            "jobseekers": JobseekerProfile.objects.count(),
+        }
 
-    context = {
-        "categories": categories,
-        "recent_jobs": recent_jobs,
-        "stats": stats,
-    }
-    return render(request, "home.html", context)
+        context.update(
+            {
+                "categories": categories,
+                "recent_jobs": recent_jobs,
+                "stats": stats,
+            }
+        )
+        return context
 
 
-def job_list(request):
-    queryset = (
-        Job.objects.open_jobs()
-        .select_related("employer", "category", "location")
-        .prefetch_related("required_skills")
-    )
+class JobListView(ListView):
+    model = Job
+    template_name = "jobs/job_list.html"
+    context_object_name = "jobs"
+    paginate_by = PAGE_SIZE
 
-    q = request.GET.get("q", "").strip()
-    if q:
-        queryset = queryset.filter(
-            Q(title__icontains=q)
-            | Q(description__icontains=q)
-            | Q(responsibilities__icontains=q)
-            | Q(category__name__icontains=q)
-            | Q(location__name__icontains=q)
-            | Q(required_skills__name__icontains=q)
-        ).distinct()
+    def paginate_queryset(self, queryset, page_size):
+        paginator = self.get_paginator(queryset, page_size)
+        page_number = self.request.GET.get("page")
+        page_obj = paginator.get_page(page_number)
+        return (paginator, page_obj, page_obj.object_list, page_obj.has_other_pages())
 
-    category_slug = request.GET.get("category", "").strip()
-    if category_slug:
-        queryset = queryset.filter(category__slug=category_slug)
+    def get_queryset(self):
+        queryset = (
+            Job.objects.open_jobs()
+            .select_related("employer", "category", "location")
+            .prefetch_related("required_skills")
+        )
 
-    location_slug = request.GET.get("location", "").strip()
-    if location_slug:
-        queryset = queryset.filter(location__slug=location_slug)
+        self.q = self.request.GET.get("q", "").strip()
+        if self.q:
+            queryset = queryset.filter(
+                Q(title__icontains=self.q)
+                | Q(description__icontains=self.q)
+                | Q(responsibilities__icontains=self.q)
+                | Q(category__name__icontains=self.q)
+                | Q(location__name__icontains=self.q)
+                | Q(required_skills__name__icontains=self.q)
+            ).distinct()
 
-    employment_type = request.GET.get("employment_type", "").strip()
-    if employment_type:
-        queryset = queryset.filter(employment_type=employment_type)
+        self.category_slug = self.request.GET.get("category", "").strip()
+        if self.category_slug:
+            queryset = queryset.filter(category__slug=self.category_slug)
 
-    remote = request.GET.get("remote", "").strip().lower()
-    if remote == "remote":
-        queryset = queryset.filter(is_remote=True)
-    elif remote == "onsite":
-        queryset = queryset.filter(is_remote=False)
+        self.location_slug = self.request.GET.get("location", "").strip()
+        if self.location_slug:
+            queryset = queryset.filter(location__slug=self.location_slug)
 
-    sort = request.GET.get("sort", "newest").strip().lower()
-    if sort == "deadline":
-        queryset = queryset.order_by("application_deadline", "-created_at")
-    else:
-        sort = "newest"
-        queryset = queryset.order_by("-created_at")
+        self.employment_type = self.request.GET.get("employment_type", "").strip()
+        if self.employment_type:
+            queryset = queryset.filter(employment_type=self.employment_type)
 
-    paginator = Paginator(queryset, PAGE_SIZE)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
+        self.remote = self.request.GET.get("remote", "").strip().lower()
+        if self.remote == "remote":
+            queryset = queryset.filter(is_remote=True)
+        elif self.remote == "onsite":
+            queryset = queryset.filter(is_remote=False)
 
-    categories = Category.objects.filter(is_active=True)
-    locations = Location.objects.all()
-    employment_types = Job.EmploymentType.choices
+        self.sort = self.request.GET.get("sort", "newest").strip().lower()
+        if self.sort == "deadline":
+            queryset = queryset.order_by("application_deadline", "-created_at")
+        else:
+            self.sort = "newest"
+            queryset = queryset.order_by("-created_at")
 
-    query_params = request.GET.copy()
-    if "page" in query_params:
-        del query_params["page"]
-    query_string = query_params.urlencode()
+        return queryset
 
-    has_filters = bool(
-        q
-        or category_slug
-        or location_slug
-        or employment_type
-        or (remote in ("remote", "onsite"))
-        or (sort and sort != "newest")
-    )
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        page_obj = context["page_obj"]
+        request = self.request
 
-    saved_job_ids = set()
-    if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
-        profile = getattr(request.user, "jobseeker_profile", None)
-        if profile:
-            page_job_ids = [j.pk for j in page_obj.object_list]
-            saved_job_ids = set(
-                profile.saved_jobs.filter(job_id__in=page_job_ids).values_list("job_id", flat=True)
+        categories = Category.objects.filter(is_active=True)
+        locations = Location.objects.all()
+        employment_types = Job.EmploymentType.choices
+
+        query_params = request.GET.copy()
+        if "page" in query_params:
+            del query_params["page"]
+        query_string = query_params.urlencode()
+
+        has_filters = bool(
+            self.q
+            or self.category_slug
+            or self.location_slug
+            or self.employment_type
+            or (self.remote in ("remote", "onsite"))
+            or (self.sort and self.sort != "newest")
+        )
+
+        saved_job_ids = set()
+        if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
+            profile = getattr(request.user, "jobseeker_profile", None)
+            if profile:
+                page_job_ids = [j.pk for j in page_obj.object_list]
+                saved_job_ids = set(
+                    profile.saved_jobs.filter(job_id__in=page_job_ids).values_list(
+                        "job_id", flat=True
+                    )
+                )
+
+        context.update(
+            {
+                "categories": categories,
+                "locations": locations,
+                "employment_types": employment_types,
+                "current_q": self.q,
+                "current_category": self.category_slug,
+                "current_location": self.location_slug,
+                "current_employment_type": self.employment_type,
+                "current_remote": self.remote,
+                "current_sort": self.sort,
+                "query_string": query_string,
+                "has_filters": has_filters,
+                "total_count": context["paginator"].count,
+                "saved_job_ids": saved_job_ids,
+            }
+        )
+        return context
+
+
+class JobDetailView(DetailView):
+    model = Job
+    template_name = "jobs/job_detail.html"
+    context_object_name = "job"
+
+    def get_queryset(self):
+        return (
+            Job.objects.open_jobs()
+            .select_related("employer", "category", "location")
+            .prefetch_related("required_skills")
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        job = self.object
+        request = self.request
+        user_application = None
+        has_active_cv = False
+        is_saved = False
+        if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
+            profile = getattr(request.user, "jobseeker_profile", None)
+            if profile:
+                user_application = profile.applications.filter(job=job).first()
+                has_active_cv = profile.cvs.filter(is_active=True).exists()
+                is_saved = profile.saved_jobs.filter(job=job).exists()
+
+        context.update(
+            {
+                "user_application": user_application,
+                "has_active_cv": has_active_cv,
+                "is_saved": is_saved,
+            }
+        )
+        return context
+
+
+class ToggleSaveJobView(JobseekerRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request, pk, *args, **kwargs):
+        job = get_object_or_404(Job, pk=pk)
+        profile = request.user.jobseeker_profile
+
+        saved_job = profile.saved_jobs.filter(job=job).first()
+        if saved_job:
+            saved_job.delete()
+            messages.info(request, f"'{job.title}' has been removed from your saved jobs.")
+        else:
+            profile.saved_jobs.get_or_create(job=job)
+            messages.success(request, f"'{job.title}' has been added to your saved jobs.")
+
+        next_url = request.POST.get("next") or request.META.get("HTTP_REFERER")
+        if next_url and url_has_allowed_host_and_scheme(
+            url=next_url,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return redirect(next_url)
+        if job.is_open:
+            return redirect("job_detail", pk=job.pk)
+        return redirect("saved_job_list")
+
+
+class SavedJobListView(JobseekerRequiredMixin, ListView):
+    model = SavedJob
+    template_name = "jobs/saved_job_list.html"
+    context_object_name = "saved_jobs"
+    paginate_by = 10
+
+    def paginate_queryset(self, queryset, page_size):
+        paginator = self.get_paginator(queryset, page_size)
+        page_number = self.request.GET.get("page")
+        page_obj = paginator.get_page(page_number)
+        return (paginator, page_obj, page_obj.object_list, page_obj.has_other_pages())
+
+    def get_queryset(self):
+        profile = self.request.user.jobseeker_profile
+        today = timezone.localdate()
+        self.today = today
+
+        self.open_q = Q(
+            job__status=Job.Status.PUBLISHED,
+            job__application_deadline__gte=today,
+            job__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
+        )
+
+        self.filter_counts = profile.saved_jobs.aggregate(
+            total=Count("id"),
+            open=Count("id", filter=self.open_q),
+            closed=Count("id", filter=~self.open_q),
+        )
+
+        status_filter = self.request.GET.get("status", "all").strip().lower()
+        saved_qs = (
+            profile.saved_jobs.select_related(
+                "job",
+                "job__employer",
+                "job__location",
+                "job__category",
             )
-
-    return render(
-        request,
-        "jobs/job_list.html",
-        {
-            "page_obj": page_obj,
-            "jobs": page_obj.object_list,
-            "categories": categories,
-            "locations": locations,
-            "employment_types": employment_types,
-            "current_q": q,
-            "current_category": category_slug,
-            "current_location": location_slug,
-            "current_employment_type": employment_type,
-            "current_remote": remote,
-            "current_sort": sort,
-            "query_string": query_string,
-            "has_filters": has_filters,
-            "total_count": paginator.count,
-            "saved_job_ids": saved_job_ids,
-        },
-    )
-
-
-def job_detail(request, pk):
-    job = get_object_or_404(
-        Job.objects.open_jobs()
-        .select_related("employer", "category", "location")
-        .prefetch_related("required_skills"),
-        pk=pk,
-    )
-    user_application = None
-    has_active_cv = False
-    is_saved = False
-    if request.user.is_authenticated and getattr(request.user, "is_jobseeker", False):
-        profile = getattr(request.user, "jobseeker_profile", None)
-        if profile:
-            user_application = profile.applications.filter(job=job).first()
-            has_active_cv = profile.cvs.filter(is_active=True).exists()
-            is_saved = profile.saved_jobs.filter(job=job).exists()
-
-    return render(
-        request,
-        "jobs/job_detail.html",
-        {
-            "job": job,
-            "user_application": user_application,
-            "has_active_cv": has_active_cv,
-            "is_saved": is_saved,
-        },
-    )
-
-
-@jobseeker_required
-@require_POST
-def toggle_save_job(request, pk):
-    job = get_object_or_404(Job, pk=pk)
-    profile = request.user.jobseeker_profile
-
-    saved_job = profile.saved_jobs.filter(job=job).first()
-    if saved_job:
-        saved_job.delete()
-        messages.info(request, f"'{job.title}' has been removed from your saved jobs.")
-    else:
-        profile.saved_jobs.get_or_create(job=job)
-        messages.success(request, f"'{job.title}' has been added to your saved jobs.")
-
-    next_url = request.POST.get("next") or request.META.get("HTTP_REFERER")
-    if next_url and url_has_allowed_host_and_scheme(
-        url=next_url,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    ):
-        return redirect(next_url)
-    if job.is_open:
-        return redirect("job_detail", pk=job.pk)
-    return redirect("saved_job_list")
-
-
-@jobseeker_required
-def saved_job_list(request):
-    profile = request.user.jobseeker_profile
-    today = timezone.localdate()
-
-    open_q = Q(
-        job__status=Job.Status.PUBLISHED,
-        job__application_deadline__gte=today,
-        job__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
-    )
-
-    filter_counts = profile.saved_jobs.aggregate(
-        total=Count("id"),
-        open=Count("id", filter=open_q),
-        closed=Count("id", filter=~open_q),
-    )
-
-    status_filter = request.GET.get("status", "all").strip().lower()
-    saved_qs = (
-        profile.saved_jobs.select_related(
-            "job",
-            "job__employer",
-            "job__location",
-            "job__category",
+            .prefetch_related("job__required_skills")
+            .order_by("-created_at")
         )
-        .prefetch_related("job__required_skills")
-        .order_by("-created_at")
-    )
 
-    if status_filter == "open":
-        saved_qs = saved_qs.filter(open_q)
-    elif status_filter in ("closed", "expired", "closed_expired"):
-        status_filter = "closed"
-        saved_qs = saved_qs.filter(~open_q)
-    else:
-        status_filter = "all"
+        if status_filter == "open":
+            saved_qs = saved_qs.filter(self.open_q)
+        elif status_filter in ("closed", "expired", "closed_expired"):
+            status_filter = "closed"
+            saved_qs = saved_qs.filter(~self.open_q)
+        else:
+            status_filter = "all"
 
-    paginator = Paginator(saved_qs, 10)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
+        self.current_status = status_filter
+        return saved_qs
 
-    page_job_ids = [sj.job_id for sj in page_obj.object_list]
-    applied_apps = {
-        app.job_id: app.pk
-        for app in profile.applications.filter(job_id__in=page_job_ids)
-    }
-    for sj in page_obj.object_list:
-        sj.user_application_pk = applied_apps.get(sj.job_id)
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        page_obj = context["page_obj"]
+        profile = self.request.user.jobseeker_profile
 
-    query_params = request.GET.copy()
-    if "page" in query_params:
-        del query_params["page"]
-    query_string = query_params.urlencode()
+        page_job_ids = [sj.job_id for sj in page_obj.object_list]
+        applied_apps = {
+            app.job_id: app.pk
+            for app in profile.applications.filter(job_id__in=page_job_ids)
+        }
+        for sj in page_obj.object_list:
+            sj.user_application_pk = applied_apps.get(sj.job_id)
 
-    return render(
-        request,
-        "jobs/saved_job_list.html",
-        {
-            "page_obj": page_obj,
-            "saved_jobs": page_obj.object_list,
-            "applied_apps": applied_apps,
-            "current_status": status_filter,
-            "filter_counts": filter_counts,
-            "total_count": filter_counts["total"],
-            "query_string": query_string,
-            "today": today,
-        },
-    )
+        query_params = self.request.GET.copy()
+        if "page" in query_params:
+            del query_params["page"]
+        query_string = query_params.urlencode()
+
+        context.update(
+            {
+                "applied_apps": applied_apps,
+                "current_status": self.current_status,
+                "filter_counts": self.filter_counts,
+                "total_count": self.filter_counts["total"],
+                "query_string": query_string,
+                "today": self.today,
+            }
+        )
+        return context
 
 
-
-@approved_employer_required
-def employer_job_list(request):
-    employer = request.user.employer_profile
-    jobs = employer.jobs.all().order_by("-created_at")
-    return render(
-        request,
-        "jobs/employer_job_list.html",
-        {
-            "jobs": jobs,
-            "employer": employer,
-        },
-    )
+# Backward-compatible function aliases
+home = HomeView.as_view()
+job_list = JobListView.as_view()
+job_detail = JobDetailView.as_view()
+toggle_save_job = ToggleSaveJobView.as_view()
+saved_job_list = SavedJobListView.as_view()
 
 
-@approved_employer_required
-def employer_job_create(request):
-    employer = request.user.employer_profile
-    form = JobForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
+
+class EmployerJobListView(ApprovedEmployerRequiredMixin, ListView):
+    """
+    Displays the list of jobs created by the authenticated approved employer,
+    ordered newest first.
+    """
+
+    model = Job
+    template_name = "jobs/employer_job_list.html"
+    context_object_name = "jobs"
+
+    def get_queryset(self):
+        return self.request.user.employer_profile.jobs.all().order_by("-created_at")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["employer"] = self.request.user.employer_profile
+        return context
+
+
+class EmployerJobCreateView(ApprovedEmployerRequiredMixin, CreateView):
+    """
+    Handles creation of a new job post by the authenticated approved employer.
+    Always initializes as draft and sets employer server-side.
+    """
+
+    model = Job
+    form_class = JobForm
+    template_name = "jobs/employer_job_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["action"] = "create"
+        return context
+
+    def form_valid(self, form):
         job = form.save(commit=False)
-        job.employer = employer
+        job.employer = self.request.user.employer_profile
         job.status = Job.Status.DRAFT
         job.save()
         form.save_m2m()
-        messages.success(request, f'Job "{job.title}" created successfully as a draft.')
+        self.object = job
+        messages.success(
+            self.request, f'Job "{job.title}" created successfully as a draft.'
+        )
         return redirect("employer_job_detail", pk=job.pk)
 
-    return render(
-        request,
-        "jobs/employer_job_form.html",
-        {
-            "form": form,
-            "action": "create",
-        },
-    )
+
+class EmployerJobDetailView(ApprovedEmployerRequiredMixin, DetailView):
+    """
+    Displays details and management options for a job owned by the authenticated approved employer.
+    """
+
+    model = Job
+    template_name = "jobs/employer_job_detail.html"
+    context_object_name = "job"
+
+    def get_queryset(self):
+        return self.request.user.employer_profile.jobs.all()
 
 
-@approved_employer_required
-def employer_job_detail(request, pk):
-    employer = request.user.employer_profile
-    job = get_object_or_404(Job, pk=pk, employer=employer)
-    return render(
-        request,
-        "jobs/employer_job_detail.html",
-        {
-            "job": job,
-        },
-    )
+class EmployerJobEditView(ApprovedEmployerRequiredMixin, UpdateView):
+    """
+    Handles editing of an existing job owned by the authenticated approved employer.
+    Server-side fields (employer, status, published_at) are protected from tampering.
+    """
 
+    model = Job
+    form_class = JobForm
+    template_name = "jobs/employer_job_form.html"
+    context_object_name = "job"
 
-@approved_employer_required
-def employer_job_edit(request, pk):
-    employer = request.user.employer_profile
-    job = get_object_or_404(Job, pk=pk, employer=employer)
-    form = JobForm(request.POST or None, instance=job)
-    if request.method == "POST" and form.is_valid():
+    def get_queryset(self):
+        return self.request.user.employer_profile.jobs.all()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["action"] = "edit"
+        return context
+
+    def form_valid(self, form):
+        employer = self.request.user.employer_profile
+        job = self.get_object()
         updated_job = form.save(commit=False)
         # Protect server-side fields from tampering
         updated_job.employer = employer
@@ -343,53 +425,69 @@ def employer_job_edit(request, pk):
         updated_job.published_at = job.published_at
         updated_job.save()
         form.save_m2m()
-        messages.success(request, f'Job "{updated_job.title}" updated successfully.')
+        self.object = updated_job
+        messages.success(
+            self.request, f'Job "{updated_job.title}" updated successfully.'
+        )
         return redirect("employer_job_detail", pk=job.pk)
 
-    return render(
-        request,
-        "jobs/employer_job_form.html",
-        {
-            "form": form,
-            "job": job,
-            "action": "edit",
-        },
-    )
+
+class EmployerJobPublishView(ApprovedEmployerRequiredMixin, View):
+    """
+    Publishes an owned draft or closed job. Requires POST method.
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk, *args, **kwargs):
+        employer = request.user.employer_profile
+        job = get_object_or_404(Job, pk=pk, employer=employer)
+        try:
+            job.publish()
+            messages.success(request, f'Job "{job.title}" has been published.')
+        except ValidationError as e:
+            if hasattr(e, "message_dict"):
+                error_msg = "; ".join(
+                    f"{k}: {', '.join(v)}" for k, v in e.message_dict.items()
+                )
+            elif hasattr(e, "messages"):
+                error_msg = "; ".join(e.messages)
+            else:
+                error_msg = str(e)
+            messages.error(request, f"Unable to publish job: {error_msg}")
+        return redirect("employer_job_detail", pk=job.pk)
 
 
-@approved_employer_required
-@require_POST
-def employer_job_publish(request, pk):
-    employer = request.user.employer_profile
-    job = get_object_or_404(Job, pk=pk, employer=employer)
-    try:
-        job.publish()
-        messages.success(request, f'Job "{job.title}" has been published.')
-    except ValidationError as e:
-        if hasattr(e, "message_dict"):
-            error_msg = "; ".join(f"{k}: {', '.join(v)}" for k, v in e.message_dict.items())
-        elif hasattr(e, "messages"):
-            error_msg = "; ".join(e.messages)
-        else:
-            error_msg = str(e)
-        messages.error(request, f"Unable to publish job: {error_msg}")
-    return redirect("employer_job_detail", pk=job.pk)
+class EmployerJobCloseView(ApprovedEmployerRequiredMixin, View):
+    """
+    Closes an owned published job. Requires POST method.
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk, *args, **kwargs):
+        employer = request.user.employer_profile
+        job = get_object_or_404(Job, pk=pk, employer=employer)
+        try:
+            job.close()
+            messages.success(request, f'Job "{job.title}" has been closed.')
+        except ValidationError as e:
+            if hasattr(e, "message_dict"):
+                error_msg = "; ".join(
+                    f"{k}: {', '.join(v)}" for k, v in e.message_dict.items()
+                )
+            elif hasattr(e, "messages"):
+                error_msg = "; ".join(e.messages)
+            else:
+                error_msg = str(e)
+            messages.error(request, f"Unable to close job: {error_msg}")
+        return redirect("employer_job_detail", pk=job.pk)
 
 
-@approved_employer_required
-@require_POST
-def employer_job_close(request, pk):
-    employer = request.user.employer_profile
-    job = get_object_or_404(Job, pk=pk, employer=employer)
-    try:
-        job.close()
-        messages.success(request, f'Job "{job.title}" has been closed.')
-    except ValidationError as e:
-        if hasattr(e, "message_dict"):
-            error_msg = "; ".join(f"{k}: {', '.join(v)}" for k, v in e.message_dict.items())
-        elif hasattr(e, "messages"):
-            error_msg = "; ".join(e.messages)
-        else:
-            error_msg = str(e)
-        messages.error(request, f"Unable to close job: {error_msg}")
-    return redirect("employer_job_detail", pk=job.pk)
+# Backward-compatible function aliases for employer job views
+employer_job_list = EmployerJobListView.as_view()
+employer_job_create = EmployerJobCreateView.as_view()
+employer_job_detail = EmployerJobDetailView.as_view()
+employer_job_edit = EmployerJobEditView.as_view()
+employer_job_publish = EmployerJobPublishView.as_view()
+employer_job_close = EmployerJobCloseView.as_view()

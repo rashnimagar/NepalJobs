@@ -4,9 +4,9 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views import View
 
-from accounts.decorators import approved_employer_required, jobseeker_required
+from accounts.mixins import ApprovedEmployerRequiredMixin, JobseekerRequiredMixin
 from jobs.models import Job
 from notifications.services import (
     notify_application_status_changed,
@@ -24,33 +24,82 @@ from .forms import (
 from .models import Application, Interview
 
 
-@jobseeker_required
-def apply_job(request, job_pk):
-    job = get_object_or_404(
-        Job.objects.select_related("employer", "category", "location"),
-        pk=job_pk,
-    )
-    if not job.is_open:
-        messages.error(request, "This job is closed or has expired and is no longer accepting applications.")
-        return redirect("job_list")
+class AsViewCacheMixin:
+    """
+    Mixin that caches the result of .as_view() when called without arguments,
+    ensuring resolve(url).func is <callable_alias> and resolve(url).func.view_class is <CBVClass>.
+    """
 
-    profile = request.user.jobseeker_profile
+    _cached_as_view = None
 
-    # Check for existing application
-    existing_application = Application.objects.filter(job=job, jobseeker=profile).first()
-    if existing_application:
-        messages.info(request, "You have already applied for this job.")
-        return redirect("jobseeker_application_detail", pk=existing_application.pk)
+    @classmethod
+    def as_view(cls, **initkwargs):
+        if not initkwargs:
+            if cls._cached_as_view is None:
+                cls._cached_as_view = super().as_view(**initkwargs)
+            return cls._cached_as_view
+        return super().as_view(**initkwargs)
 
-    # Candidate must have at least one active CV
-    if not profile.cvs.filter(is_active=True).exists():
-        messages.warning(
-            request,
-            "You need an active CV uploaded before you can apply for jobs. Please upload a CV first.",
+
+class ApplyJobView(AsViewCacheMixin, JobseekerRequiredMixin, View):
+    """
+    Job application submission view for authenticated jobseekers.
+    Validates job status, existing application, and active CV presence.
+    Creates application in APPLIED status and dispatches notification.
+    """
+
+    template_name = "applications/apply_form.html"
+
+    def _validate_application_prerequisites(self, request, job_pk):
+        job = get_object_or_404(
+            Job.objects.select_related("employer", "category", "location"),
+            pk=job_pk,
         )
-        return redirect("cv_list")
+        if not job.is_open:
+            messages.error(
+                request,
+                "This job is closed or has expired and is no longer accepting applications.",
+            )
+            return job, None, redirect("job_list")
 
-    if request.method == "POST":
+        profile = request.user.jobseeker_profile
+
+        # Check for existing application
+        existing_application = Application.objects.filter(job=job, jobseeker=profile).first()
+        if existing_application:
+            messages.info(request, "You have already applied for this job.")
+            return job, profile, redirect("jobseeker_application_detail", pk=existing_application.pk)
+
+        # Candidate must have at least one active CV
+        if not profile.cvs.filter(is_active=True).exists():
+            messages.warning(
+                request,
+                "You need an active CV uploaded before you can apply for jobs. Please upload a CV first.",
+            )
+            return job, profile, redirect("cv_list")
+
+        return job, profile, None
+
+    def get(self, request, job_pk, *args, **kwargs):
+        job, profile, early_redirect = self._validate_application_prerequisites(request, job_pk)
+        if early_redirect:
+            return early_redirect
+
+        form = JobApplicationForm(jobseeker=profile)
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "job": job,
+            },
+        )
+
+    def post(self, request, job_pk, *args, **kwargs):
+        job, profile, early_redirect = self._validate_application_prerequisites(request, job_pk)
+        if early_redirect:
+            return early_redirect
+
         job.refresh_from_db()
         if not job.is_open:
             messages.error(request, "This job has closed and is no longer accepting applications.")
@@ -84,251 +133,395 @@ def apply_job(request, job_pk):
                 f"Application submitted successfully! Your application for '{job.title}' at {job.employer.company_name} was received.",
             )
             return redirect("jobseeker_application_detail", pk=application.pk)
-    else:
-        form = JobApplicationForm(jobseeker=profile)
 
-    return render(
-        request,
-        "applications/apply_form.html",
-        {
-            "form": form,
-            "job": job,
-        },
-    )
-
-
-@jobseeker_required
-def jobseeker_application_list(request):
-    profile = request.user.jobseeker_profile
-    all_applications = (
-        profile.applications.select_related("job", "job__employer", "job__location", "cv")
-        .order_by("-created_at")
-    )
-
-    # Compute status counts in a single aggregation query
-    status_counts = all_applications.aggregate(
-        total=Count("id"),
-        applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
-        under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
-        shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
-        interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
-        selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
-        rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
-    )
-    status_counts["all"] = status_counts["total"]
-
-    # Status filtering
-    current_status = request.GET.get("status", "").strip().lower()
-    if current_status in Application.Status.values:
-        filtered_applications = all_applications.filter(status=current_status)
-    else:
-        current_status = "all"
-        filtered_applications = all_applications
-
-    # Pagination: 10 applications per page
-    paginator = Paginator(filtered_applications, 10)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
-
-    status_display_map = dict(Application.Status.choices)
-    current_status_display = status_display_map.get(current_status, "All")
-
-    return render(
-        request,
-        "applications/jobseeker_application_list.html",
-        {
-            "applications": page_obj,
-            "page_obj": page_obj,
-            "current_status": current_status,
-            "current_status_display": current_status_display,
-            "status_counts": status_counts,
-        },
-    )
-
-
-@jobseeker_required
-def jobseeker_application_detail(request, pk):
-    profile = request.user.jobseeker_profile
-    application = get_object_or_404(
-        Application.objects.select_related(
-            "job",
-            "job__employer",
-            "job__location",
-            "job__category",
-            "cv",
-        ).prefetch_related("status_history", "interviews"),
-        pk=pk,
-        jobseeker=profile,
-    )
-
-    # Canonical recruitment stages for candidate progress stepper
-    pipeline_stages = [
-        {"key": Application.Status.APPLIED, "label": "Applied", "step": 1},
-        {"key": Application.Status.UNDER_REVIEW, "label": "Under Review", "step": 2},
-        {"key": Application.Status.SHORTLISTED, "label": "Shortlisted", "step": 3},
-        {"key": Application.Status.INTERVIEW, "label": "Interview", "step": 4},
-        {"key": Application.Status.SELECTED, "label": "Selected", "step": 5},
-    ]
-
-    stage_order = {
-        Application.Status.APPLIED: 1,
-        Application.Status.UNDER_REVIEW: 2,
-        Application.Status.SHORTLISTED: 3,
-        Application.Status.INTERVIEW: 4,
-        Application.Status.SELECTED: 5,
-    }
-
-    current_step = stage_order.get(application.status, 0)
-    is_rejected = application.status == Application.Status.REJECTED
-
-    NEXT_STEPS_GUIDANCE = {
-        Application.Status.APPLIED: "Your application was received and is pending employer review.",
-        Application.Status.UNDER_REVIEW: "The recruitment team is evaluating your CV and qualifications.",
-        Application.Status.SHORTLISTED: "You have been shortlisted. The employer is reviewing candidates for the next stage.",
-        Application.Status.INTERVIEW: "You have reached the interview stage. The employer will provide interview details through the appropriate recruitment process.",
-        Application.Status.SELECTED: "You have been selected for this role. The hiring team will be in touch regarding next steps.",
-        Application.Status.REJECTED: "Your application was not selected for this opportunity. We encourage you to continue exploring other roles.",
-    }
-
-    status_display_map = dict(Application.Status.choices)
-
-    # Build candidate-safe progression timeline:
-    # Initial "Applied" timeline event always comes from application.created_at
-    timeline_events = [
-        {
-            "status": Application.Status.APPLIED,
-            "status_display": status_display_map.get(Application.Status.APPLIED, "Applied"),
-            "timestamp": application.created_at,
-        }
-    ]
-
-    # Append actual status history records in chronological order, exposing ONLY safe fields
-    for history in application.status_history.order_by("created_at"):
-        if history.new_status == Application.Status.APPLIED and len(timeline_events) == 1:
-            continue
-        timeline_events.append(
+        return render(
+            request,
+            self.template_name,
             {
-                "status": history.new_status,
-                "status_display": status_display_map.get(history.new_status, history.new_status.title()),
-                "timestamp": history.created_at,
-            }
+                "form": form,
+                "job": job,
+            },
         )
 
-    # Fetch interview information and expose ONLY candidate-safe fields
-    active_interview = application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).first()
-    historical_interviews = application.interviews.exclude(status=Interview.InterviewStatus.SCHEDULED).order_by("-scheduled_at", "-created_at")
 
-    candidate_active_interview = None
-    if active_interview:
-        candidate_active_interview = {
-            "scheduled_at": active_interview.scheduled_at,
-            "duration_minutes": active_interview.duration_minutes,
-            "interview_type_display": active_interview.get_interview_type_display(),
-            "interview_type": active_interview.interview_type,
-            "location_or_link": active_interview.location_or_link,
-            "candidate_instructions": active_interview.candidate_instructions,
-            "status": active_interview.status,
-            "status_display": active_interview.get_status_display(),
+class JobseekerApplicationListView(AsViewCacheMixin, JobseekerRequiredMixin, View):
+    """
+    Lists applications submitted by the authenticated jobseeker.
+    Provides recruitment stage counts aggregation and status filtering.
+    """
+
+    template_name = "applications/jobseeker_application_list.html"
+
+    def get(self, request, *args, **kwargs):
+        profile = request.user.jobseeker_profile
+        all_applications = (
+            profile.applications.select_related("job", "job__employer", "job__location", "cv")
+            .order_by("-created_at")
+        )
+
+        # Compute status counts in a single aggregation query
+        status_counts = all_applications.aggregate(
+            total=Count("id"),
+            applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
+            under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
+            shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
+            interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
+            selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
+            rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
+        )
+        status_counts["all"] = status_counts["total"]
+
+        # Status filtering
+        current_status = request.GET.get("status", "").strip().lower()
+        if current_status in Application.Status.values:
+            filtered_applications = all_applications.filter(status=current_status)
+        else:
+            current_status = "all"
+            filtered_applications = all_applications
+
+        # Pagination: 10 applications per page
+        paginator = Paginator(filtered_applications, 10)
+        page_number = request.GET.get("page")
+        page_obj = paginator.get_page(page_number)
+
+        status_display_map = dict(Application.Status.choices)
+        current_status_display = status_display_map.get(current_status, "All")
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "applications": page_obj,
+                "page_obj": page_obj,
+                "current_status": current_status,
+                "current_status_display": current_status_display,
+                "status_counts": status_counts,
+            },
+        )
+
+
+class JobseekerApplicationDetailView(AsViewCacheMixin, JobseekerRequiredMixin, View):
+    """
+    Detailed candidate-facing view of a submitted application.
+    Displays recruitment progress stepper, safe timeline events, and safe interview projections.
+    Internal employer notes and reviewer details remain strictly inaccessible.
+    """
+
+    template_name = "applications/jobseeker_application_detail.html"
+
+    def get(self, request, pk, *args, **kwargs):
+        profile = request.user.jobseeker_profile
+        application = get_object_or_404(
+            Application.objects.select_related(
+                "job",
+                "job__employer",
+                "job__location",
+                "job__category",
+                "cv",
+            ).prefetch_related("status_history", "interviews"),
+            pk=pk,
+            jobseeker=profile,
+        )
+
+        # Canonical recruitment stages for candidate progress stepper
+        pipeline_stages = [
+            {"key": Application.Status.APPLIED, "label": "Applied", "step": 1},
+            {"key": Application.Status.UNDER_REVIEW, "label": "Under Review", "step": 2},
+            {"key": Application.Status.SHORTLISTED, "label": "Shortlisted", "step": 3},
+            {"key": Application.Status.INTERVIEW, "label": "Interview", "step": 4},
+            {"key": Application.Status.SELECTED, "label": "Selected", "step": 5},
+        ]
+
+        stage_order = {
+            Application.Status.APPLIED: 1,
+            Application.Status.UNDER_REVIEW: 2,
+            Application.Status.SHORTLISTED: 3,
+            Application.Status.INTERVIEW: 4,
+            Application.Status.SELECTED: 5,
         }
 
-    candidate_historical_interviews = []
-    for h_int in historical_interviews:
-        candidate_historical_interviews.append({
-            "scheduled_at": h_int.scheduled_at,
-            "duration_minutes": h_int.duration_minutes,
-            "interview_type_display": h_int.get_interview_type_display(),
-            "interview_type": h_int.interview_type,
-            "location_or_link": h_int.location_or_link,
-            "candidate_instructions": h_int.candidate_instructions,
-            "status": h_int.status,
-            "status_display": h_int.get_status_display(),
-        })
+        current_step = stage_order.get(application.status, 0)
+        is_rejected = application.status == Application.Status.REJECTED
 
-    return render(
-        request,
-        "applications/jobseeker_application_detail.html",
-        {
+        next_steps_guidance = {
+            Application.Status.APPLIED: "Your application was received and is pending employer review.",
+            Application.Status.UNDER_REVIEW: "The recruitment team is evaluating your CV and qualifications.",
+            Application.Status.SHORTLISTED: "You have been shortlisted. The employer is reviewing candidates for the next stage.",
+            Application.Status.INTERVIEW: "You have reached the interview stage. The employer will provide interview details through the appropriate recruitment process.",
+            Application.Status.SELECTED: "You have been selected for this role. The hiring team will be in touch regarding next steps.",
+            Application.Status.REJECTED: "Your application was not selected for this opportunity. We encourage you to continue exploring other roles.",
+        }
+
+        status_display_map = dict(Application.Status.choices)
+
+        # Build candidate-safe progression timeline:
+        # Initial "Applied" timeline event always comes from application.created_at
+        timeline_events = [
+            {
+                "status": Application.Status.APPLIED,
+                "status_display": status_display_map.get(Application.Status.APPLIED, "Applied"),
+                "timestamp": application.created_at,
+            }
+        ]
+
+        # Append actual status history records in chronological order, exposing ONLY safe fields
+        for history in application.status_history.order_by("created_at"):
+            if history.new_status == Application.Status.APPLIED and len(timeline_events) == 1:
+                continue
+            timeline_events.append(
+                {
+                    "status": history.new_status,
+                    "status_display": status_display_map.get(history.new_status, history.new_status.title()),
+                    "timestamp": history.created_at,
+                }
+            )
+
+        # Fetch interview information and expose ONLY candidate-safe fields
+        active_interview = application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).first()
+        historical_interviews = application.interviews.exclude(status=Interview.InterviewStatus.SCHEDULED).order_by("-scheduled_at", "-created_at")
+
+        candidate_active_interview = None
+        if active_interview:
+            candidate_active_interview = {
+                "scheduled_at": active_interview.scheduled_at,
+                "duration_minutes": active_interview.duration_minutes,
+                "interview_type_display": active_interview.get_interview_type_display(),
+                "interview_type": active_interview.interview_type,
+                "location_or_link": active_interview.location_or_link,
+                "candidate_instructions": active_interview.candidate_instructions,
+                "status": active_interview.status,
+                "status_display": active_interview.get_status_display(),
+            }
+
+        candidate_historical_interviews = []
+        for h_int in historical_interviews:
+            candidate_historical_interviews.append({
+                "scheduled_at": h_int.scheduled_at,
+                "duration_minutes": h_int.duration_minutes,
+                "interview_type_display": h_int.get_interview_type_display(),
+                "interview_type": h_int.interview_type,
+                "location_or_link": h_int.location_or_link,
+                "candidate_instructions": h_int.candidate_instructions,
+                "status": h_int.status,
+                "status_display": h_int.get_status_display(),
+            })
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "application": application,
+                "pipeline_stages": pipeline_stages,
+                "current_step": current_step,
+                "is_rejected": is_rejected,
+                "next_steps_guidance": next_steps_guidance.get(application.status, ""),
+                "timeline_events": timeline_events,
+                "candidate_active_interview": candidate_active_interview,
+                "candidate_historical_interviews": candidate_historical_interviews,
+            },
+        )
+
+
+class EmployerJobApplicantsView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    Displays applicants for a specific job owned by the approved employer.
+    Includes stage count filters and status-based query filtering.
+    """
+
+    template_name = "applications/employer_applicant_list.html"
+
+    def get(self, request, job_pk, *args, **kwargs):
+        employer = request.user.employer_profile
+        job = get_object_or_404(
+            Job.objects.select_related("employer", "category", "location"),
+            pk=job_pk,
+            employer=employer,
+        )
+
+        all_applicants = (
+            job.applications.select_related("jobseeker", "jobseeker__user", "cv")
+            .order_by("-created_at")
+        )
+
+        # Status counts for filter pills
+        status_counts = {
+            "all": all_applicants.count(),
+            Application.Status.APPLIED: all_applicants.filter(status=Application.Status.APPLIED).count(),
+            Application.Status.UNDER_REVIEW: all_applicants.filter(status=Application.Status.UNDER_REVIEW).count(),
+            Application.Status.SHORTLISTED: all_applicants.filter(status=Application.Status.SHORTLISTED).count(),
+            Application.Status.INTERVIEW: all_applicants.filter(status=Application.Status.INTERVIEW).count(),
+            Application.Status.SELECTED: all_applicants.filter(status=Application.Status.SELECTED).count(),
+            Application.Status.REJECTED: all_applicants.filter(status=Application.Status.REJECTED).count(),
+        }
+
+        # Query param filtering
+        current_status = request.GET.get("status", "").strip().lower()
+        if current_status in Application.Status.values:
+            applicants = all_applicants.filter(status=current_status)
+        else:
+            current_status = "all"
+            applicants = all_applicants
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "job": job,
+                "applicants": applicants,
+                "current_status": current_status,
+                "status_counts": status_counts,
+            },
+        )
+
+
+class EmployerAllApplicantsView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    Unified candidate overview across all jobs owned by the approved employer.
+    Supports job filtering, status filtering, multi-field search, and pagination.
+    """
+
+    template_name = "applications/employer_all_applicants.html"
+
+    def get(self, request, *args, **kwargs):
+        employer = request.user.employer_profile
+        employer_jobs = employer.jobs.all().order_by("title")
+
+        applicants_qs = (
+            Application.objects.filter(job__employer=employer)
+            .select_related("job", "job__location", "jobseeker__user", "cv")
+            .order_by("-created_at")
+        )
+
+        # Status counts aggregation across all employer applicants
+        status_counts = applicants_qs.aggregate(
+            total=Count("id"),
+            applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
+            under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
+            shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
+            interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
+            selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
+            rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
+        )
+        status_counts["all"] = status_counts["total"]
+
+        # Filter by job
+        selected_job_id = request.GET.get("job", "").strip()
+        if selected_job_id.isdigit():
+            job_pk = int(selected_job_id)
+            if employer_jobs.filter(pk=job_pk).exists():
+                applicants_qs = applicants_qs.filter(job_id=job_pk)
+            else:
+                selected_job_id = ""
+        else:
+            selected_job_id = ""
+
+        # Filter by status
+        current_status = request.GET.get("status", "").strip().lower()
+        if current_status in Application.Status.values:
+            applicants_qs = applicants_qs.filter(status=current_status)
+        else:
+            current_status = "all"
+
+        # Search filter (candidate name, email, or job title)
+        q = request.GET.get("q", "").strip()
+        if q:
+            applicants_qs = applicants_qs.filter(
+                Q(jobseeker__user__first_name__icontains=q)
+                | Q(jobseeker__user__last_name__icontains=q)
+                | Q(jobseeker__user__email__icontains=q)
+                | Q(jobseeker__user__username__icontains=q)
+                | Q(job__title__icontains=q)
+            )
+
+        # Pagination: 15 per page
+        paginator = Paginator(applicants_qs, 15)
+        page_number = request.GET.get("page")
+        page_obj = paginator.get_page(page_number)
+
+        # Query string preservation across pagination
+        query_params = request.GET.copy()
+        if "page" in query_params:
+            del query_params["page"]
+        query_string = query_params.urlencode()
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "page_obj": page_obj,
+                "applicants": page_obj.object_list,
+                "employer_jobs": employer_jobs,
+                "selected_job_id": selected_job_id,
+                "current_status": current_status,
+                "status_counts": status_counts,
+                "q": q,
+                "query_string": query_string,
+            },
+        )
+
+
+class EmployerApplicationDetailView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    Detailed candidate application review view for approved employers.
+    Handles stage transitions, interview scheduling/completion controls, and audit history.
+    Terminal applications cannot have their status altered.
+    """
+
+    template_name = "applications/employer_application_detail.html"
+
+    def _get_application(self, request, pk):
+        employer = request.user.employer_profile
+        return get_object_or_404(
+            Application.objects.select_related(
+                "job",
+                "job__employer",
+                "jobseeker",
+                "jobseeker__user",
+                "cv",
+            ).prefetch_related(
+                "jobseeker__skills",
+                "jobseeker__educations",
+                "jobseeker__experiences",
+                "status_history",
+                "status_history__changed_by",
+                "interviews",
+                "interviews__created_by",
+            ),
+            pk=pk,
+            job__employer=employer,
+        )
+
+    def _build_context(self, application, form):
+        history = application.status_history.select_related("changed_by").order_by("-created_at")
+        active_interview = application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).first()
+        historical_interviews = application.interviews.exclude(status=Interview.InterviewStatus.SCHEDULED).order_by("-scheduled_at", "-created_at")
+        can_schedule_interview = (
+            not active_interview
+            and application.status in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW)
+        )
+        schedule_interview_form = InterviewScheduleForm() if can_schedule_interview else None
+        complete_interview_form = InterviewCompleteForm() if active_interview else None
+
+        return {
             "application": application,
-            "pipeline_stages": pipeline_stages,
-            "current_step": current_step,
-            "is_rejected": is_rejected,
-            "next_steps_guidance": NEXT_STEPS_GUIDANCE.get(application.status, ""),
-            "timeline_events": timeline_events,
-            "candidate_active_interview": candidate_active_interview,
-            "candidate_historical_interviews": candidate_historical_interviews,
-        },
-    )
+            "form": form,
+            "history": history,
+            "can_change_status": not application.is_terminal,
+            "active_interview": active_interview,
+            "historical_interviews": historical_interviews,
+            "can_schedule_interview": can_schedule_interview,
+            "schedule_interview_form": schedule_interview_form,
+            "complete_interview_form": complete_interview_form,
+        }
 
+    def get(self, request, pk, *args, **kwargs):
+        application = self._get_application(request, pk)
+        form = ApplicationStatusUpdateForm(instance=application)
+        return render(request, self.template_name, self._build_context(application, form))
 
-@approved_employer_required
-def employer_job_applicants(request, job_pk):
-    employer = request.user.employer_profile
-    job = get_object_or_404(
-        Job.objects.select_related("employer", "category", "location"),
-        pk=job_pk,
-        employer=employer,
-    )
+    def post(self, request, pk, *args, **kwargs):
+        application = self._get_application(request, pk)
 
-    all_applicants = (
-        job.applications.select_related("jobseeker", "jobseeker__user", "cv")
-        .order_by("-created_at")
-    )
-
-    # Status counts for filter pills
-    status_counts = {
-        "all": all_applicants.count(),
-        Application.Status.APPLIED: all_applicants.filter(status=Application.Status.APPLIED).count(),
-        Application.Status.UNDER_REVIEW: all_applicants.filter(status=Application.Status.UNDER_REVIEW).count(),
-        Application.Status.SHORTLISTED: all_applicants.filter(status=Application.Status.SHORTLISTED).count(),
-        Application.Status.INTERVIEW: all_applicants.filter(status=Application.Status.INTERVIEW).count(),
-        Application.Status.SELECTED: all_applicants.filter(status=Application.Status.SELECTED).count(),
-        Application.Status.REJECTED: all_applicants.filter(status=Application.Status.REJECTED).count(),
-    }
-
-    # Query param filtering
-    current_status = request.GET.get("status", "").strip().lower()
-    if current_status in Application.Status.values:
-        applicants = all_applicants.filter(status=current_status)
-    else:
-        current_status = "all"
-        applicants = all_applicants
-
-    return render(
-        request,
-        "applications/employer_applicant_list.html",
-        {
-            "job": job,
-            "applicants": applicants,
-            "current_status": current_status,
-            "status_counts": status_counts,
-        },
-    )
-
-
-@approved_employer_required
-def employer_application_detail(request, pk):
-    employer = request.user.employer_profile
-    application = get_object_or_404(
-        Application.objects.select_related(
-            "job",
-            "job__employer",
-            "jobseeker",
-            "jobseeker__user",
-            "cv",
-        ).prefetch_related(
-            "jobseeker__skills",
-            "jobseeker__educations",
-            "jobseeker__experiences",
-            "status_history",
-            "status_history__changed_by",
-            "interviews",
-            "interviews__created_by",
-        ),
-        pk=pk,
-        job__employer=employer,
-    )
-
-    if request.method == "POST":
         if application.is_terminal:
             messages.error(request, "This application has reached a terminal status and cannot be modified.")
             return redirect("employer_application_detail", pk=application.pk)
@@ -348,61 +541,66 @@ def employer_application_detail(request, pk):
                 return redirect("employer_application_detail", pk=application.pk)
             except ValidationError as e:
                 form.add_error(None, e)
-    else:
-        form = ApplicationStatusUpdateForm(instance=application)
 
-    history = application.status_history.select_related("changed_by").order_by("-created_at")
-
-    active_interview = application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).first()
-    historical_interviews = application.interviews.exclude(status=Interview.InterviewStatus.SCHEDULED).order_by("-scheduled_at", "-created_at")
-    can_schedule_interview = (
-        not active_interview
-        and application.status in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW)
-    )
-    schedule_interview_form = InterviewScheduleForm() if can_schedule_interview else None
-    complete_interview_form = InterviewCompleteForm() if active_interview else None
-
-    return render(
-        request,
-        "applications/employer_application_detail.html",
-        {
-            "application": application,
-            "form": form,
-            "history": history,
-            "can_change_status": not application.is_terminal,
-            "active_interview": active_interview,
-            "historical_interviews": historical_interviews,
-            "can_schedule_interview": can_schedule_interview,
-            "schedule_interview_form": schedule_interview_form,
-            "complete_interview_form": complete_interview_form,
-        },
-    )
+        return render(request, self.template_name, self._build_context(application, form))
 
 
-@approved_employer_required
-def employer_schedule_interview(request, pk):
-    employer = request.user.employer_profile
-    application = get_object_or_404(
-        Application.objects.select_related("job", "job__employer", "jobseeker__user"),
-        pk=pk,
-        job__employer=employer,
-    )
+class EmployerScheduleInterviewView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    Schedules an interview for a shortlisted or interviewing candidate.
+    Automatically advances shortlisted applications to INTERVIEW stage within a transaction.
+    """
 
-    if application.status not in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW):
-        messages.error(
-            request,
-            f"Interviews can only be scheduled for applications in 'Shortlisted' or 'Interview' stage, not '{application.get_status_display()}'.",
+    template_name = "applications/employer_interview_form.html"
+
+    def _get_application(self, request, pk):
+        employer = request.user.employer_profile
+        return get_object_or_404(
+            Application.objects.select_related("job", "job__employer", "jobseeker__user"),
+            pk=pk,
+            job__employer=employer,
         )
-        return redirect("employer_application_detail", pk=application.pk)
 
-    if application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).exists():
-        messages.warning(
+    def _validate_application_stage(self, request, application):
+        if application.status not in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW):
+            messages.error(
+                request,
+                f"Interviews can only be scheduled for applications in 'Shortlisted' or 'Interview' stage, not '{application.get_status_display()}'.",
+            )
+            return redirect("employer_application_detail", pk=application.pk)
+
+        if application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).exists():
+            messages.warning(
+                request,
+                "This application already has an active scheduled interview. Please reschedule or cancel it instead.",
+            )
+            return redirect("employer_application_detail", pk=application.pk)
+
+        return None
+
+    def get(self, request, pk, *args, **kwargs):
+        application = self._get_application(request, pk)
+        early_redirect = self._validate_application_stage(request, application)
+        if early_redirect:
+            return early_redirect
+
+        form = InterviewScheduleForm()
+        return render(
             request,
-            "This application already has an active scheduled interview. Please reschedule or cancel it instead.",
+            self.template_name,
+            {
+                "form": form,
+                "application": application,
+                "action": "schedule",
+            },
         )
-        return redirect("employer_application_detail", pk=application.pk)
 
-    if request.method == "POST":
+    def post(self, request, pk, *args, **kwargs):
+        application = self._get_application(request, pk)
+        early_redirect = self._validate_application_stage(request, application)
+        if early_redirect:
+            return early_redirect
+
         form = InterviewScheduleForm(request.POST)
         if form.is_valid():
             try:
@@ -429,34 +627,64 @@ def employer_schedule_interview(request, pk):
                 return redirect("employer_application_detail", pk=application.pk)
             except ValidationError as e:
                 form.add_error(None, e)
-    else:
-        form = InterviewScheduleForm()
 
-    return render(
-        request,
-        "applications/employer_interview_form.html",
-        {
-            "form": form,
-            "application": application,
-            "action": "schedule",
-        },
-    )
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "application": application,
+                "action": "schedule",
+            },
+        )
 
 
-@approved_employer_required
-def employer_edit_interview(request, pk):
-    employer = request.user.employer_profile
-    interview = get_object_or_404(
-        Interview.objects.select_related("application", "application__job", "application__jobseeker__user"),
-        pk=pk,
-        application__job__employer=employer,
-    )
+class EmployerEditInterviewView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    Reschedules an active scheduled interview.
+    Dispatches interview reschedule notifications to candidate and employer.
+    """
 
-    if interview.status != Interview.InterviewStatus.SCHEDULED:
-        messages.error(request, "Only active scheduled interviews can be rescheduled.")
-        return redirect("employer_application_detail", pk=interview.application.pk)
+    template_name = "applications/employer_interview_form.html"
 
-    if request.method == "POST":
+    def _get_interview(self, request, pk):
+        employer = request.user.employer_profile
+        return get_object_or_404(
+            Interview.objects.select_related(
+                "application",
+                "application__job",
+                "application__jobseeker__user",
+            ),
+            pk=pk,
+            application__job__employer=employer,
+        )
+
+    def get(self, request, pk, *args, **kwargs):
+        interview = self._get_interview(request, pk)
+
+        if interview.status != Interview.InterviewStatus.SCHEDULED:
+            messages.error(request, "Only active scheduled interviews can be rescheduled.")
+            return redirect("employer_application_detail", pk=interview.application.pk)
+
+        form = InterviewScheduleForm(instance=interview)
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "application": interview.application,
+                "interview": interview,
+                "action": "reschedule",
+            },
+        )
+
+    def post(self, request, pk, *args, **kwargs):
+        interview = self._get_interview(request, pk)
+
+        if interview.status != Interview.InterviewStatus.SCHEDULED:
+            messages.error(request, "Only active scheduled interviews can be rescheduled.")
+            return redirect("employer_application_detail", pk=interview.application.pk)
+
         form = InterviewScheduleForm(request.POST, instance=interview)
         if form.is_valid():
             try:
@@ -471,143 +699,86 @@ def employer_edit_interview(request, pk):
                 return redirect("employer_application_detail", pk=interview.application.pk)
             except ValidationError as e:
                 form.add_error(None, e)
-    else:
-        form = InterviewScheduleForm(instance=interview)
 
-    return render(
-        request,
-        "applications/employer_interview_form.html",
-        {
-            "form": form,
-            "application": interview.application,
-            "interview": interview,
-            "action": "reschedule",
-        },
-    )
-
-
-@approved_employer_required
-@require_POST
-def employer_cancel_interview(request, pk):
-    employer = request.user.employer_profile
-    interview = get_object_or_404(
-        Interview.objects.select_related("application"),
-        pk=pk,
-        application__job__employer=employer,
-    )
-
-    if interview.status != Interview.InterviewStatus.SCHEDULED:
-        messages.error(request, "Only active scheduled interviews can be cancelled.")
-        return redirect("employer_application_detail", pk=interview.application.pk)
-
-    interview.cancel()
-    notify_interview_cancelled(interview)
-    messages.success(request, "The interview has been cancelled.")
-    return redirect("employer_application_detail", pk=interview.application.pk)
-
-
-@approved_employer_required
-@require_POST
-def employer_complete_interview(request, pk):
-    employer = request.user.employer_profile
-    interview = get_object_or_404(
-        Interview.objects.select_related("application", "application__job"),
-        pk=pk,
-        application__job__employer=employer,
-    )
-
-    if interview.status != Interview.InterviewStatus.SCHEDULED:
-        messages.error(request, "Only active scheduled interviews can be marked as completed.")
-        return redirect("employer_application_detail", pk=interview.application.pk)
-
-    form = InterviewCompleteForm(request.POST)
-    if form.is_valid():
-        outcome_notes = form.cleaned_data.get("outcome_notes", "")
-        try:
-            interview.complete(outcome_notes=outcome_notes)
-            messages.success(request, "The interview has been marked as completed.")
-        except ValidationError as e:
-            messages.error(request, str(e))
-    else:
-        messages.error(request, "Unable to complete interview due to invalid form data.")
-
-    return redirect("employer_application_detail", pk=interview.application.pk)
-
-
-@approved_employer_required
-def employer_all_applicants(request):
-    employer = request.user.employer_profile
-    employer_jobs = employer.jobs.all().order_by("title")
-
-    applicants_qs = (
-        Application.objects.filter(job__employer=employer)
-        .select_related("job", "job__location", "jobseeker__user", "cv")
-        .order_by("-created_at")
-    )
-
-    # Status counts aggregation across all employer applicants
-    status_counts = applicants_qs.aggregate(
-        total=Count("id"),
-        applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
-        under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
-        shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
-        interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
-        selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
-        rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
-    )
-    status_counts["all"] = status_counts["total"]
-
-    # Filter by job
-    selected_job_id = request.GET.get("job", "").strip()
-    if selected_job_id.isdigit():
-        job_pk = int(selected_job_id)
-        if employer_jobs.filter(pk=job_pk).exists():
-            applicants_qs = applicants_qs.filter(job_id=job_pk)
-        else:
-            selected_job_id = ""
-    else:
-        selected_job_id = ""
-
-    # Filter by status
-    current_status = request.GET.get("status", "").strip().lower()
-    if current_status in Application.Status.values:
-        applicants_qs = applicants_qs.filter(status=current_status)
-    else:
-        current_status = "all"
-
-    # Search filter (candidate name, email, or job title)
-    q = request.GET.get("q", "").strip()
-    if q:
-        applicants_qs = applicants_qs.filter(
-            Q(jobseeker__user__first_name__icontains=q)
-            | Q(jobseeker__user__last_name__icontains=q)
-            | Q(jobseeker__user__email__icontains=q)
-            | Q(jobseeker__user__username__icontains=q)
-            | Q(job__title__icontains=q)
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "application": interview.application,
+                "interview": interview,
+                "action": "reschedule",
+            },
         )
 
-    # Pagination: 15 per page
-    paginator = Paginator(applicants_qs, 15)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
 
-    # Query string preservation across pagination
-    query_params = request.GET.copy()
-    if "page" in query_params:
-        del query_params["page"]
-    query_string = query_params.urlencode()
+class EmployerCancelInterviewView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    POST-only view to cancel an active scheduled interview.
+    Notifies candidate and employer upon cancellation.
+    """
 
-    return render(
-        request,
-        "applications/employer_all_applicants.html",
-        {
-            "page_obj": page_obj,
-            "applicants": page_obj.object_list,
-            "employer_jobs": employer_jobs,
-            "selected_job_id": selected_job_id,
-            "current_status": current_status,
-            "status_counts": status_counts,
-            "q": q,
-            "query_string": query_string,
-        },
-    )
+    http_method_names = ["post"]
+
+    def post(self, request, pk, *args, **kwargs):
+        employer = request.user.employer_profile
+        interview = get_object_or_404(
+            Interview.objects.select_related("application"),
+            pk=pk,
+            application__job__employer=employer,
+        )
+
+        if interview.status != Interview.InterviewStatus.SCHEDULED:
+            messages.error(request, "Only active scheduled interviews can be cancelled.")
+            return redirect("employer_application_detail", pk=interview.application.pk)
+
+        interview.cancel()
+        notify_interview_cancelled(interview)
+        messages.success(request, "The interview has been cancelled.")
+        return redirect("employer_application_detail", pk=interview.application.pk)
+
+
+class EmployerCompleteInterviewView(AsViewCacheMixin, ApprovedEmployerRequiredMixin, View):
+    """
+    POST-only view to record completion and outcome notes for an active scheduled interview.
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk, *args, **kwargs):
+        employer = request.user.employer_profile
+        interview = get_object_or_404(
+            Interview.objects.select_related("application", "application__job"),
+            pk=pk,
+            application__job__employer=employer,
+        )
+
+        if interview.status != Interview.InterviewStatus.SCHEDULED:
+            messages.error(request, "Only active scheduled interviews can be marked as completed.")
+            return redirect("employer_application_detail", pk=interview.application.pk)
+
+        form = InterviewCompleteForm(request.POST)
+        if form.is_valid():
+            outcome_notes = form.cleaned_data.get("outcome_notes", "")
+            try:
+                interview.complete(outcome_notes=outcome_notes)
+                messages.success(request, "The interview has been marked as completed.")
+            except ValidationError as e:
+                messages.error(request, str(e))
+        else:
+            messages.error(request, "Unable to complete interview due to invalid form data.")
+
+        return redirect("employer_application_detail", pk=interview.application.pk)
+
+
+# Backward-compatible function aliases for application and interview views
+apply_job = ApplyJobView.as_view()
+jobseeker_application_list = JobseekerApplicationListView.as_view()
+jobseeker_application_detail = JobseekerApplicationDetailView.as_view()
+employer_job_applicants = EmployerJobApplicantsView.as_view()
+employer_all_applicants = EmployerAllApplicantsView.as_view()
+employer_application_detail = EmployerApplicationDetailView.as_view()
+employer_schedule_interview = EmployerScheduleInterviewView.as_view()
+employer_edit_interview = EmployerEditInterviewView.as_view()
+employer_cancel_interview = EmployerCancelInterviewView.as_view()
+employer_complete_interview = EmployerCompleteInterviewView.as_view()

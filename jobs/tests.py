@@ -5,9 +5,18 @@ from django.contrib.admin.sites import site
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
+from django.views import View
+from django.views.generic import (
+    CreateView,
+    DetailView,
+    ListView,
+    TemplateView,
+    UpdateView,
+)
 
+from accounts.mixins import ApprovedEmployerRequiredMixin, JobseekerRequiredMixin
 from accounts.models import (
     CV,
     Education,
@@ -21,6 +30,30 @@ from applications.models import Application, ApplicationStatusHistory, Interview
 from jobs.admin import CategoryAdmin, JobAdmin, LocationAdmin, SavedJobAdmin
 from jobs.forms import JobForm
 from jobs.models import Category, Job, Location, SavedJob
+from jobs.views import (
+    EmployerJobCloseView,
+    EmployerJobCreateView,
+    EmployerJobDetailView,
+    EmployerJobEditView,
+    EmployerJobListView,
+    EmployerJobPublishView,
+    HomeView,
+    JobDetailView,
+    JobListView,
+    SavedJobListView,
+    ToggleSaveJobView,
+    employer_job_close,
+    employer_job_create,
+    employer_job_detail,
+    employer_job_edit,
+    employer_job_list,
+    employer_job_publish,
+    home,
+    job_detail,
+    job_list,
+    saved_job_list,
+    toggle_save_job,
+)
 from notifications.models import Notification
 
 
@@ -3578,5 +3611,339 @@ class AdminBackOfficePolishTests(TestCase):
         self.assertEqual(int_admin.get_job(self.interview), "Senior Python Backend Developer")
 
 
+class PublicAndJobseekerJobsCBVTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="cbv_emp", email="cbv_emp@example.com")
+        self.category = make_category(name="CBV Cat", slug="cbv-cat")
+        self.location = make_location(name="CBV Loc", slug="cbv-loc")
+        self.jobseeker = make_jobseeker(username="cbv_js", email="cbv_js@example.com")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Senior Django Architect",
+            description="Leading backend systems architecture.",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+
+    def test_url_resolution_to_cbv_classes(self):
+        self.assertIs(resolve(reverse("home")).func.view_class, HomeView)
+        self.assertIs(resolve(reverse("job_list")).func.view_class, JobListView)
+        self.assertIs(resolve(reverse("job_detail", args=[self.job.pk])).func.view_class, JobDetailView)
+        self.assertIs(resolve(reverse("saved_job_list")).func.view_class, SavedJobListView)
+        self.assertIs(resolve(reverse("toggle_save_job", args=[self.job.pk])).func.view_class, ToggleSaveJobView)
+
+    def test_backward_compatible_aliases(self):
+        self.assertIs(home.view_class, HomeView)
+        self.assertIs(job_list.view_class, JobListView)
+        self.assertIs(job_detail.view_class, JobDetailView)
+        self.assertIs(saved_job_list.view_class, SavedJobListView)
+        self.assertIs(toggle_save_job.view_class, ToggleSaveJobView)
+
+    def test_cbv_class_hierarchy_and_mixins(self):
+        self.assertTrue(issubclass(HomeView, TemplateView))
+        self.assertTrue(issubclass(JobListView, ListView))
+        self.assertTrue(issubclass(JobDetailView, DetailView))
+        self.assertTrue(issubclass(SavedJobListView, (JobseekerRequiredMixin, ListView)))
+        self.assertTrue(issubclass(ToggleSaveJobView, (JobseekerRequiredMixin, View)))
+        self.assertEqual(ToggleSaveJobView.http_method_names, ["post"])
+
+    def test_public_views_accessible_without_authentication(self):
+        # Home
+        res_home = self.client.get(reverse("home"))
+        self.assertEqual(res_home.status_code, 200)
+        self.assertIn("categories", res_home.context)
+        self.assertIn("recent_jobs", res_home.context)
+        self.assertIn("stats", res_home.context)
+
+        # Job List
+        res_list = self.client.get(reverse("job_list"))
+        self.assertEqual(res_list.status_code, 200)
+        self.assertIn("jobs", res_list.context)
+        self.assertIn("page_obj", res_list.context)
+        self.assertIn("categories", res_list.context)
+        self.assertIn("locations", res_list.context)
+        self.assertIn("saved_job_ids", res_list.context)
+
+        # Job Detail
+        res_detail = self.client.get(reverse("job_detail", args=[self.job.pk]))
+        self.assertEqual(res_detail.status_code, 200)
+        self.assertEqual(res_detail.context["job"], self.job)
+        self.assertIsNone(res_detail.context["user_application"])
+        self.assertFalse(res_detail.context["has_active_cv"])
+        self.assertFalse(res_detail.context["is_saved"])
+
+    def test_job_detail_closed_job_returns_404(self):
+        draft_job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Draft Position",
+            description="Not yet published.",
+            application_deadline=timezone.localdate() + timedelta(days=5),
+            status=Job.Status.DRAFT,
+        )
+        response = self.client.get(reverse("job_detail", args=[draft_job.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_saved_job_views_authorization_and_methods(self):
+        saved_list_url = reverse("saved_job_list")
+        toggle_url = reverse("toggle_save_job", args=[self.job.pk])
+
+        # Anonymous access redirects to login
+        res_anon_list = self.client.get(saved_list_url)
+        self.assertEqual(res_anon_list.status_code, 302)
+        self.assertIn(reverse("login"), res_anon_list.url)
+
+        res_anon_toggle = self.client.post(toggle_url)
+        self.assertEqual(res_anon_toggle.status_code, 302)
+        self.assertIn(reverse("login"), res_anon_toggle.url)
+
+        # Employer access is forbidden (403)
+        self.client.force_login(self.employer.user)
+        self.assertEqual(self.client.get(saved_list_url).status_code, 403)
+        self.assertEqual(self.client.post(toggle_url).status_code, 403)
+
+        # Jobseeker access
+        self.client.force_login(self.jobseeker)
+        # GET on toggle is 405 Method Not Allowed
+        self.assertEqual(self.client.get(toggle_url).status_code, 405)
+        # GET on saved list is 200
+        res_js_list = self.client.get(saved_list_url)
+        self.assertEqual(res_js_list.status_code, 200)
+        self.assertIn("saved_jobs", res_js_list.context)
+        self.assertIn("page_obj", res_js_list.context)
+        self.assertIn("filter_counts", res_js_list.context)
 
 
+class EmployerJobManagementCBVTests(TestCase):
+    """
+    Regression test suite verifying CBV conversion for the six employer job-management views:
+    EmployerJobListView, EmployerJobCreateView, EmployerJobDetailView,
+    EmployerJobEditView, EmployerJobPublishView, EmployerJobCloseView.
+    """
+
+    def setUp(self):
+        self.employer_a = make_approved_employer(username="cbv_emp_a", email="cbv_emp_a@example.com")
+        self.employer_b = make_approved_employer(username="cbv_emp_b", email="cbv_emp_b@example.com")
+        self.pending_employer = make_pending_employer(username="cbv_pending", email="cbv_pending@example.com")
+        self.rejected_employer = make_rejected_employer(username="cbv_rejected", email="cbv_rejected@example.com")
+        self.jobseeker = make_jobseeker(username="cbv_jobseeker", email="cbv_jobseeker@example.com")
+
+        self.category = make_category(name="CBV Cat", slug="cbv-cat")
+        self.location = make_location(name="CBV Loc", slug="cbv-loc")
+        self.skill = Skill.objects.create(name="Python CBV")
+
+        self.job_a = Job.objects.create(
+            employer=self.employer_a,
+            category=self.category,
+            location=self.location,
+            title="CBV Job A",
+            description="CBV description A",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.DRAFT,
+        )
+        self.job_b = Job.objects.create(
+            employer=self.employer_b,
+            category=self.category,
+            location=self.location,
+            title="CBV Job B",
+            description="CBV description B",
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.DRAFT,
+        )
+
+    def test_cbv_class_structure_and_url_resolution(self):
+        # Verify CBV subclasses
+        self.assertTrue(issubclass(EmployerJobListView, (ApprovedEmployerRequiredMixin, ListView)))
+        self.assertTrue(issubclass(EmployerJobCreateView, (ApprovedEmployerRequiredMixin, CreateView)))
+        self.assertTrue(issubclass(EmployerJobDetailView, (ApprovedEmployerRequiredMixin, DetailView)))
+        self.assertTrue(issubclass(EmployerJobEditView, (ApprovedEmployerRequiredMixin, UpdateView)))
+        self.assertTrue(issubclass(EmployerJobPublishView, (ApprovedEmployerRequiredMixin, View)))
+        self.assertTrue(issubclass(EmployerJobCloseView, (ApprovedEmployerRequiredMixin, View)))
+
+        # Verify callable aliases
+        self.assertTrue(callable(employer_job_list))
+        self.assertTrue(callable(employer_job_create))
+        self.assertTrue(callable(employer_job_detail))
+        self.assertTrue(callable(employer_job_edit))
+        self.assertTrue(callable(employer_job_publish))
+        self.assertTrue(callable(employer_job_close))
+
+        self.assertIs(employer_job_list.view_class, EmployerJobListView)
+        self.assertIs(employer_job_create.view_class, EmployerJobCreateView)
+        self.assertIs(employer_job_detail.view_class, EmployerJobDetailView)
+        self.assertIs(employer_job_edit.view_class, EmployerJobEditView)
+        self.assertIs(employer_job_publish.view_class, EmployerJobPublishView)
+        self.assertIs(employer_job_close.view_class, EmployerJobCloseView)
+
+        # Verify URL resolution
+        self.assertIs(resolve(reverse("employer_job_list")).func.view_class, EmployerJobListView)
+        self.assertIs(resolve(reverse("employer_job_create")).func.view_class, EmployerJobCreateView)
+        self.assertIs(resolve(reverse("employer_job_detail", args=[self.job_a.pk])).func.view_class, EmployerJobDetailView)
+        self.assertIs(resolve(reverse("employer_job_edit", args=[self.job_a.pk])).func.view_class, EmployerJobEditView)
+        self.assertIs(resolve(reverse("employer_job_publish", args=[self.job_a.pk])).func.view_class, EmployerJobPublishView)
+        self.assertIs(resolve(reverse("employer_job_close", args=[self.job_a.pk])).func.view_class, EmployerJobCloseView)
+
+    def test_authorization_matrix(self):
+        urls_get = [
+            reverse("employer_job_list"),
+            reverse("employer_job_create"),
+            reverse("employer_job_detail", args=[self.job_a.pk]),
+            reverse("employer_job_edit", args=[self.job_a.pk]),
+        ]
+        urls_post = [
+            reverse("employer_job_publish", args=[self.job_a.pk]),
+            reverse("employer_job_close", args=[self.job_a.pk]),
+        ]
+
+        # 1. Anonymous -> 302 to login
+        for url in urls_get:
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, 302)
+            self.assertIn(reverse("login"), res.url)
+        for url in urls_post:
+            res = self.client.post(url)
+            self.assertEqual(res.status_code, 302)
+            self.assertIn(reverse("login"), res.url)
+
+        # 2. Non-employer (jobseeker) -> 403
+        self.client.force_login(self.jobseeker)
+        for url in urls_get:
+            self.assertEqual(self.client.get(url).status_code, 403)
+        for url in urls_post:
+            self.assertEqual(self.client.post(url).status_code, 403)
+
+        # 3. Pending employer -> 403
+        self.client.force_login(self.pending_employer.user)
+        for url in urls_get:
+            self.assertEqual(self.client.get(url).status_code, 403)
+        for url in urls_post:
+            self.assertEqual(self.client.post(url).status_code, 403)
+
+        # 4. Rejected employer -> 403
+        self.client.force_login(self.rejected_employer.user)
+        for url in urls_get:
+            self.assertEqual(self.client.get(url).status_code, 403)
+        for url in urls_post:
+            self.assertEqual(self.client.post(url).status_code, 403)
+
+        # 5. Employer without profile -> 403
+        user_no_profile = User.objects.create_user(
+            username="cbv_no_prof", email="cbv_no_prof@example.com", password="Password123!", role=User.Role.EMPLOYER
+        )
+        self.client.force_login(user_no_profile)
+        for url in urls_get:
+            self.assertEqual(self.client.get(url).status_code, 403)
+        for url in urls_post:
+            self.assertEqual(self.client.post(url).status_code, 403)
+
+    def test_ownership_isolation_and_404(self):
+        self.client.force_login(self.employer_a.user)
+
+        # List contains job A, not job B
+        res_list = self.client.get(reverse("employer_job_list"))
+        self.assertEqual(res_list.status_code, 200)
+        jobs_in_context = list(res_list.context["jobs"])
+        self.assertIn(self.job_a, jobs_in_context)
+        self.assertNotIn(self.job_b, jobs_in_context)
+
+        # Detail on job B -> 404
+        self.assertEqual(self.client.get(reverse("employer_job_detail", args=[self.job_b.pk])).status_code, 404)
+
+        # Edit on job B -> 404 (GET and POST)
+        self.assertEqual(self.client.get(reverse("employer_job_edit", args=[self.job_b.pk])).status_code, 404)
+        self.assertEqual(self.client.post(reverse("employer_job_edit", args=[self.job_b.pk]), {"title": "Hacked"}).status_code, 404)
+
+        # Publish on job B -> 404
+        self.assertEqual(self.client.post(reverse("employer_job_publish", args=[self.job_b.pk])).status_code, 404)
+
+        # Close on job B -> 404
+        self.assertEqual(self.client.post(reverse("employer_job_close", args=[self.job_b.pk])).status_code, 404)
+
+    def test_http_method_restrictions(self):
+        self.client.force_login(self.employer_a.user)
+        # GET on publish and close are rejected with 405 Method Not Allowed
+        self.assertEqual(self.client.get(reverse("employer_job_publish", args=[self.job_a.pk])).status_code, 405)
+        self.assertEqual(self.client.get(reverse("employer_job_close", args=[self.job_a.pk])).status_code, 405)
+
+    def test_create_and_edit_crud_lifecycle(self):
+        self.client.force_login(self.employer_a.user)
+
+        # Create invalid -> returns 200 with form errors and action="create"
+        res_create_invalid = self.client.post(reverse("employer_job_create"), {"title": ""})
+        self.assertEqual(res_create_invalid.status_code, 200)
+        self.assertIn("form", res_create_invalid.context)
+        self.assertEqual(res_create_invalid.context["action"], "create")
+
+        # Create valid -> redirects to detail, sets draft status and employer
+        valid_payload = {
+            "title": "Newly Created CBV Job",
+            "category": self.category.pk,
+            "location": self.location.pk,
+            "is_remote": True,
+            "employment_type": Job.EmploymentType.FULL_TIME,
+            "vacancies": 2,
+            "salary_min": 40000,
+            "salary_max": 80000,
+            "is_salary_negotiable": True,
+            "experience_years_min": 2,
+            "education_level": Education.Level.BACHELOR,
+            "required_skills": [self.skill.pk],
+            "application_deadline": (timezone.localdate() + timedelta(days=20)).isoformat(),
+            "description": "Full description of new job.",
+        }
+        res_create = self.client.post(reverse("employer_job_create"), valid_payload)
+        new_job = Job.objects.get(title="Newly Created CBV Job")
+        self.assertRedirects(res_create, reverse("employer_job_detail", args=[new_job.pk]))
+        self.assertEqual(new_job.employer, self.employer_a)
+        self.assertEqual(new_job.status, Job.Status.DRAFT)
+
+        # Edit invalid -> returns 200 with form errors and action="edit"
+        res_edit_invalid = self.client.post(reverse("employer_job_edit", args=[new_job.pk]), {"title": ""})
+        self.assertEqual(res_edit_invalid.status_code, 200)
+        self.assertIn("form", res_edit_invalid.context)
+        self.assertEqual(res_edit_invalid.context["action"], "edit")
+
+        # Edit valid -> updates allowed fields, preserves status and employer
+        valid_payload["title"] = "Updated CBV Job Title"
+        res_edit = self.client.post(reverse("employer_job_edit", args=[new_job.pk]), valid_payload)
+        self.assertRedirects(res_edit, reverse("employer_job_detail", args=[new_job.pk]))
+        new_job.refresh_from_db()
+        self.assertEqual(new_job.title, "Updated CBV Job Title")
+        self.assertEqual(new_job.employer, self.employer_a)
+        self.assertEqual(new_job.status, Job.Status.DRAFT)
+
+    def test_publish_and_close_lifecycle_and_messages(self):
+        self.client.force_login(self.employer_a.user)
+
+        # 1. Publish valid draft
+        res_pub = self.client.post(reverse("employer_job_publish", args=[self.job_a.pk]))
+        self.assertRedirects(res_pub, reverse("employer_job_detail", args=[self.job_a.pk]))
+        self.job_a.refresh_from_db()
+        self.assertEqual(self.job_a.status, Job.Status.PUBLISHED)
+        self.assertIsNotNone(self.job_a.published_at)
+
+        # 2. Close published job
+        res_close = self.client.post(reverse("employer_job_close", args=[self.job_a.pk]))
+        self.assertRedirects(res_close, reverse("employer_job_detail", args=[self.job_a.pk]))
+        self.job_a.refresh_from_db()
+        self.assertEqual(self.job_a.status, Job.Status.CLOSED)
+
+        # 3. Publish draft with past deadline -> validation failure
+        past_draft = Job.objects.create(
+            employer=self.employer_a,
+            category=self.category,
+            location=self.location,
+            title="Past Deadline CBV Job",
+            description="CBV description",
+            application_deadline=timezone.localdate() - timedelta(days=2),
+            status=Job.Status.DRAFT,
+        )
+        res_pub_past = self.client.post(reverse("employer_job_publish", args=[past_draft.pk]))
+        self.assertRedirects(res_pub_past, reverse("employer_job_detail", args=[past_draft.pk]))
+        past_draft.refresh_from_db()
+        self.assertEqual(past_draft.status, Job.Status.DRAFT)
+        self.assertIsNone(past_draft.published_at)
