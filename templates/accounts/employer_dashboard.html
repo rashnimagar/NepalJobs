@@ -276,21 +276,7 @@
                         {{ app.created_at|date:"M d, Y" }}
                       </td>
                       <td>
-                        {% if app.status == 'applied' %}
-                          <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
-                        {% elif app.status == 'under_review' %}
-                          <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
-                        {% elif app.status == 'shortlisted' %}
-                          <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
-                        {% elif app.status == 'interview' %}
-                          <span class="badge bg-primary text-white">Interview</span>
-                        {% elif app.status == 'selected' %}
-                          <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
-                        {% elif app.status == 'rejected' %}
-                          <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
-                        {% else %}
-                          <span class="badge bg-secondary">{{ app.get_status_display }}</span>
-                        {% endif %}
+                        {% include 'includes/application_status_badge.html' with status=app.status display=app.get_status_display %}
                       </td>
                       <td class="text-end">
                         <a href="{% url 'employer_application_detail' app.pk %}" class="btn btn-sm btn-primary">

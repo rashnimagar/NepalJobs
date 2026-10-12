@@ -143,21 +143,7 @@
                 {{ app.created_at|date:"M d, Y" }}
               </td>
               <td>
-                {% if app.status == 'applied' %}
-                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
-                {% elif app.status == 'under_review' %}
-                  <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
-                {% elif app.status == 'shortlisted' %}
-                  <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
-                {% elif app.status == 'interview' %}
-                  <span class="badge bg-primary text-white">Interview</span>
-                {% elif app.status == 'selected' %}
-                  <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
-                {% elif app.status == 'rejected' %}
-                  <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
-                {% else %}
-                  <span class="badge bg-secondary">{{ app.get_status_display }}</span>
-                {% endif %}
+                {% include 'includes/application_status_badge.html' with status=app.status display=app.get_status_display %}
               </td>
               <td>
                 {% if app.cv %}
@@ -181,45 +167,7 @@
   </div>
 
   {# Pagination #}
-  {% if page_obj.has_other_pages %}
-    <nav class="mt-4" aria-label="Applicants pagination">
-      <ul class="pagination justify-content-center">
-        {% if page_obj.has_previous %}
-          <li class="page-item">
-            <a class="page-link" href="?page=1{% if query_string %}&{{ query_string }}{% endif %}">&laquo; First</a>
-          </li>
-          <li class="page-item">
-            <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if query_string %}&{{ query_string }}{% endif %}">Previous</a>
-          </li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">&laquo; First</span></li>
-          <li class="page-item disabled"><span class="page-link">Previous</span></li>
-        {% endif %}
-
-        {% for num in page_obj.paginator.page_range %}
-          {% if page_obj.number == num %}
-            <li class="page-item active" aria-current="page"><span class="page-link">{{ num }}</span></li>
-          {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-            <li class="page-item">
-              <a class="page-link" href="?page={{ num }}{% if query_string %}&{{ query_string }}{% endif %}">{{ num }}</a>
-            </li>
-          {% endif %}
-        {% endfor %}
-
-        {% if page_obj.has_next %}
-          <li class="page-item">
-            <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if query_string %}&{{ query_string }}{% endif %}">Next</a>
-          </li>
-          <li class="page-item">
-            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if query_string %}&{{ query_string }}{% endif %}">Last &raquo;</a>
-          </li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">Next</span></li>
-          <li class="page-item disabled"><span class="page-link">Last &raquo;</span></li>
-        {% endif %}
-      </ul>
-    </nav>
-  {% endif %}
+  {% include 'includes/pagination.html' with page_obj=page_obj query_string=query_string aria_label="Applicants pagination" show_first_last=True %}
 
 {% else %}
   <div class="card shadow-sm border-0 text-center py-5">

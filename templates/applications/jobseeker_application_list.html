@@ -81,21 +81,7 @@
               </td>
               <td>{{ app.created_at|date:"M d, Y" }}</td>
               <td>
-                {% if app.status == 'applied' %}
-                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
-                {% elif app.status == 'under_review' %}
-                  <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
-                {% elif app.status == 'shortlisted' %}
-                  <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
-                {% elif app.status == 'interview' %}
-                  <span class="badge bg-primary text-white">Interview</span>
-                {% elif app.status == 'selected' %}
-                  <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
-                {% elif app.status == 'rejected' %}
-                  <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
-                {% else %}
-                  <span class="badge bg-secondary">{{ app.get_status_display }}</span>
-                {% endif %}
+                {% include 'includes/application_status_badge.html' with status=app.status display=app.get_status_display %}
               </td>
               <td class="text-end pe-4">
                 <a href="{% url 'jobseeker_application_detail' app.pk %}" class="btn btn-outline-secondary btn-sm">
@@ -124,21 +110,7 @@
               </div>
             </div>
             <div>
-              {% if app.status == 'applied' %}
-                <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Applied</span>
-              {% elif app.status == 'under_review' %}
-                <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">Under Review</span>
-              {% elif app.status == 'shortlisted' %}
-                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Shortlisted</span>
-              {% elif app.status == 'interview' %}
-                <span class="badge bg-primary text-white">Interview</span>
-              {% elif app.status == 'selected' %}
-                <span class="badge bg-success-subtle text-success border border-success-subtle">Selected</span>
-              {% elif app.status == 'rejected' %}
-                <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Rejected</span>
-              {% else %}
-                <span class="badge bg-secondary">{{ app.get_status_display }}</span>
-              {% endif %}
+              {% include 'includes/application_status_badge.html' with status=app.status display=app.get_status_display %}
             </div>
           </div>
           <div class="d-flex flex-wrap gap-2 text-muted small mb-3">
@@ -159,40 +131,10 @@
   </div>
 
   {# Pagination #}
-  {% if page_obj.has_other_pages %}
-    <nav aria-label="Applications pagination" class="mt-4">
-      <ul class="pagination justify-content-center">
-        {% if page_obj.has_previous %}
-          <li class="page-item">
-            <a class="page-link" href="?{% if current_status != 'all' %}status={{ current_status }}&{% endif %}page={{ page_obj.previous_page_number }}" aria-label="Previous">
-              &laquo; Previous
-            </a>
-          </li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">&laquo; Previous</span></li>
-        {% endif %}
-
-        {% for num in page_obj.paginator.page_range %}
-          {% if page_obj.number == num %}
-            <li class="page-item active" aria-current="page"><span class="page-link">{{ num }}</span></li>
-          {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-            <li class="page-item">
-              <a class="page-link" href="?{% if current_status != 'all' %}status={{ current_status }}&{% endif %}page={{ num }}">{{ num }}</a>
-            </li>
-          {% endif %}
-        {% endfor %}
-
-        {% if page_obj.has_next %}
-          <li class="page-item">
-            <a class="page-link" href="?{% if current_status != 'all' %}status={{ current_status }}&{% endif %}page={{ page_obj.next_page_number }}" aria-label="Next">
-              Next &raquo;
-            </a>
-          </li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">Next &raquo;</span></li>
-        {% endif %}
-      </ul>
-    </nav>
+  {% if current_status != 'all' %}
+    {% include 'includes/pagination.html' with page_obj=page_obj query_string="status="|add:current_status aria_label="Applications pagination" %}
+  {% else %}
+    {% include 'includes/pagination.html' with page_obj=page_obj aria_label="Applications pagination" %}
   {% endif %}
 
 {% else %}

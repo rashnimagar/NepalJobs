@@ -1,0 +1,49 @@
+{% if status %}
+  {% if status == 'applied' %}
+    <span class="badge bg-primary-subtle text-primary border border-primary-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Applied</span>
+  {% elif status == 'under_review' %}
+    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Under Review</span>
+  {% elif status == 'shortlisted' %}
+    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Shortlisted</span>
+  {% elif status == 'interview' %}
+    <span class="badge bg-primary text-white{% if extra_classes %} {{ extra_classes }}{% endif %}">Interview</span>
+  {% elif status == 'selected' %}
+    <span class="badge bg-success-subtle text-success border border-success-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Selected</span>
+  {% elif status == 'rejected' %}
+    <span class="badge bg-danger-subtle text-danger border border-danger-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Rejected</span>
+  {% else %}
+    <span class="badge bg-secondary{% if extra_classes %} {{ extra_classes }}{% endif %}">{{ display|default:status }}</span>
+  {% endif %}
+{% elif app %}
+  {% if app.status == 'applied' %}
+    <span class="badge bg-primary-subtle text-primary border border-primary-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Applied</span>
+  {% elif app.status == 'under_review' %}
+    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Under Review</span>
+  {% elif app.status == 'shortlisted' %}
+    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Shortlisted</span>
+  {% elif app.status == 'interview' %}
+    <span class="badge bg-primary text-white{% if extra_classes %} {{ extra_classes }}{% endif %}">Interview</span>
+  {% elif app.status == 'selected' %}
+    <span class="badge bg-success-subtle text-success border border-success-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Selected</span>
+  {% elif app.status == 'rejected' %}
+    <span class="badge bg-danger-subtle text-danger border border-danger-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Rejected</span>
+  {% else %}
+    <span class="badge bg-secondary{% if extra_classes %} {{ extra_classes }}{% endif %}">{{ display|default:app.get_status_display }}</span>
+  {% endif %}
+{% elif application %}
+  {% if application.status == 'applied' %}
+    <span class="badge bg-primary-subtle text-primary border border-primary-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Applied</span>
+  {% elif application.status == 'under_review' %}
+    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Under Review</span>
+  {% elif application.status == 'shortlisted' %}
+    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Shortlisted</span>
+  {% elif application.status == 'interview' %}
+    <span class="badge bg-primary text-white{% if extra_classes %} {{ extra_classes }}{% endif %}">Interview</span>
+  {% elif application.status == 'selected' %}
+    <span class="badge bg-success-subtle text-success border border-success-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Selected</span>
+  {% elif application.status == 'rejected' %}
+    <span class="badge bg-danger-subtle text-danger border border-danger-subtle{% if extra_classes %} {{ extra_classes }}{% endif %}">Rejected</span>
+  {% else %}
+    <span class="badge bg-secondary{% if extra_classes %} {{ extra_classes }}{% endif %}">{{ display|default:application.get_status_display }}</span>
+  {% endif %}
+{% endif %}

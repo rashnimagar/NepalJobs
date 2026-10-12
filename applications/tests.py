@@ -7,7 +7,9 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.paginator import Paginator
 from django.db import IntegrityError
+from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
 from django.urls import resolve, reverse
 from django.utils import timezone
@@ -3084,3 +3086,98 @@ class ApplicationsAndInterviewLifecycleCBVTests(TempMediaTestCase):
         new_interview.refresh_from_db()
         self.assertEqual(new_interview.status, Interview.InterviewStatus.COMPLETED)
         self.assertIn("recommend for hire", new_interview.internal_notes)
+
+
+class ApplicationStatusBadgeAndPaginationPartialTests(TestCase):
+    def test_status_badge_classes_and_labels_for_all_statuses(self):
+        expected_mappings = {
+            "applied": ("badge bg-primary-subtle text-primary border border-primary-subtle", "Applied"),
+            "under_review": ("badge bg-info-subtle text-info-emphasis border border-info-subtle", "Under Review"),
+            "shortlisted": ("badge bg-warning-subtle text-warning-emphasis border border-warning-subtle", "Shortlisted"),
+            "interview": ("badge bg-primary text-white", "Interview"),
+            "selected": ("badge bg-success-subtle text-success border border-success-subtle", "Selected"),
+            "rejected": ("badge bg-danger-subtle text-danger border border-danger-subtle", "Rejected"),
+            "other_status": ("badge bg-secondary", "Custom Display"),
+        }
+        for status_code, (expected_class, expected_label) in expected_mappings.items():
+            rendered = render_to_string(
+                "includes/application_status_badge.html",
+                {"status": status_code, "display": expected_label},
+            ).strip()
+            self.assertIn(f'class="{expected_class}"', rendered)
+            self.assertIn(f">{expected_label}</span>", rendered)
+
+    def test_status_badge_extra_classes(self):
+        rendered = render_to_string(
+            "includes/application_status_badge.html",
+            {"status": "applied", "display": "Applied", "extra_classes": "fs-6 px-3 py-2"},
+        ).strip()
+        expected_class = "badge bg-primary-subtle text-primary border border-primary-subtle fs-6 px-3 py-2"
+        self.assertIn(f'class="{expected_class}"', rendered)
+
+    def test_status_badge_context_variable_support(self):
+        class DummyApp:
+            def __init__(self, status_val, label):
+                self.status = status_val
+                self.label = label
+
+            def get_status_display(self):
+                return self.label
+
+        # via app
+        app_obj = DummyApp("interview", "Interview")
+        rendered_app = render_to_string("includes/application_status_badge.html", {"app": app_obj}).strip()
+        self.assertIn('class="badge bg-primary text-white"', rendered_app)
+        self.assertIn(">Interview</span>", rendered_app)
+
+        # via application
+        application_obj = DummyApp("selected", "Selected")
+        rendered_application = render_to_string("includes/application_status_badge.html", {"application": application_obj}).strip()
+        self.assertIn('class="badge bg-success-subtle text-success border border-success-subtle"', rendered_application)
+        self.assertIn(">Selected</span>", rendered_application)
+
+    def test_pagination_window_and_links(self):
+        paginator = Paginator(list(range(50)), 10)
+        page_obj = paginator.page(3)
+        rendered = render_to_string(
+            "includes/pagination.html",
+            {"page_obj": page_obj, "aria_label": "Test pagination"},
+        )
+        self.assertIn('aria-label="Test pagination"', rendered)
+        self.assertIn("?page=2", rendered)
+        self.assertIn("?page=4", rendered)
+        self.assertIn('<li class="page-item active" aria-current="page"><span class="page-link">3</span></li>', rendered)
+
+    def test_pagination_preserves_query_string(self):
+        paginator = Paginator(list(range(50)), 10)
+        page_obj = paginator.page(2)
+        rendered = render_to_string(
+            "includes/pagination.html",
+            {"page_obj": page_obj, "query_string": "status=open&category=tech"},
+        )
+        self.assertIn("?status=open&amp;category=tech&page=1", rendered)
+        self.assertIn("?status=open&amp;category=tech&page=3", rendered)
+
+    def test_pagination_show_first_last_buttons(self):
+        paginator = Paginator(list(range(50)), 10)
+        page_obj = paginator.page(2)
+        rendered = render_to_string(
+            "includes/pagination.html",
+            {"page_obj": page_obj, "show_first_last": True},
+        )
+        self.assertIn("?page=1", rendered)
+        self.assertIn("&laquo; First", rendered)
+        self.assertIn("?page=5", rendered)
+        self.assertIn("Last &raquo;", rendered)
+
+    def test_pagination_simple_mode(self):
+        paginator = Paginator(list(range(50)), 10)
+        page_obj = paginator.page(2)
+        rendered = render_to_string(
+            "includes/pagination.html",
+            {"page_obj": page_obj, "is_simple": True},
+        )
+        self.assertIn("Page 2 of 5", rendered)
+        self.assertIn("?page=1", rendered)
+        self.assertIn("?page=3", rendered)
+        self.assertNotIn("page-range", rendered)

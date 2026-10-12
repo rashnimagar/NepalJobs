@@ -123,41 +123,7 @@
           </div>
 
           {# Pagination #}
-          {% if page_obj.has_other_pages %}
-            <nav aria-label="Company job listings pages" class="mt-4">
-              <ul class="pagination justify-content-center mb-0">
-                {% if page_obj.has_previous %}
-                  <li class="page-item">
-                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}" aria-label="Previous">
-                      &laquo; Previous
-                    </a>
-                  </li>
-                {% else %}
-                  <li class="page-item disabled"><span class="page-link">&laquo; Previous</span></li>
-                {% endif %}
-
-                {% for num in page_obj.paginator.page_range %}
-                  {% if page_obj.number == num %}
-                    <li class="page-item active" aria-current="page"><span class="page-link">{{ num }}</span></li>
-                  {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-                    <li class="page-item">
-                      <a class="page-link" href="?page={{ num }}">{{ num }}</a>
-                    </li>
-                  {% endif %}
-                {% endfor %}
-
-                {% if page_obj.has_next %}
-                  <li class="page-item">
-                    <a class="page-link" href="?page={{ page_obj.next_page_number }}" aria-label="Next">
-                      Next &raquo;
-                    </a>
-                  </li>
-                {% else %}
-                  <li class="page-item disabled"><span class="page-link">Next &raquo;</span></li>
-                {% endif %}
-              </ul>
-            </nav>
-          {% endif %}
+          {% include 'includes/pagination.html' with page_obj=page_obj aria_label="Company job listings pages" ul_class="pagination justify-content-center mb-0" %}
 
         {% else %}
           <div class="text-center py-4">
