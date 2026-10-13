@@ -3181,3 +3181,118 @@ class ApplicationStatusBadgeAndPaginationPartialTests(TestCase):
         self.assertIn("?page=1", rendered)
         self.assertIn("?page=3", rendered)
         self.assertNotIn("page-range", rendered)
+
+
+class ApplicationStatusCountsAndInterviewEligibilityTests(TestCase):
+    def setUp(self):
+        self.employer_user = get_user_model().objects.create_user(
+            username="counts_emp_u",
+            email="counts_emp_u@example.com",
+            password="Testpass123!",
+            role=get_user_model().Role.EMPLOYER,
+        )
+        self.employer = EmployerProfile.objects.create(
+            user=self.employer_user,
+            company_name="Counts Corp",
+            verification_status=EmployerProfile.VerificationStatus.APPROVED,
+        )
+        self.category = Category.objects.create(name="Counts Tech", slug="counts-tech")
+        self.location = Location.objects.create(name="Counts City", slug="counts-city")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Counts Engineer",
+            description="Desc",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+        )
+
+    def test_status_counts_aggregation_empty_queryset(self):
+        counts = Application.objects.none().get_status_counts()
+        self.assertEqual(counts["total"], 0)
+        self.assertEqual(counts["all"], 0)
+        for st in Application.Status.values:
+            self.assertEqual(counts[st], 0)
+
+    def test_status_counts_aggregation_multiple_statuses_and_single_query(self):
+        statuses = [
+            Application.Status.APPLIED,
+            Application.Status.APPLIED,
+            Application.Status.UNDER_REVIEW,
+            Application.Status.SHORTLISTED,
+            Application.Status.INTERVIEW,
+            Application.Status.SELECTED,
+            Application.Status.REJECTED,
+        ]
+        for i, st in enumerate(statuses):
+            u = get_user_model().objects.create_user(
+                username=f"counts_cand_{i}",
+                email=f"counts_cand_{i}@example.com",
+                password="Testpass123!",
+                role=get_user_model().Role.JOBSEEKER,
+            )
+            js = JobseekerProfile.objects.create(user=u)
+            Application.objects.create(job=self.job, jobseeker=js, status=st)
+
+        # Verify exact counts and single query execution
+        with self.assertNumQueries(1):
+            counts = self.job.applications.get_status_counts()
+
+        self.assertEqual(counts["total"], 7)
+        self.assertEqual(counts["all"], 7)
+        self.assertEqual(counts["applied"], 2)
+        self.assertEqual(counts["under_review"], 1)
+        self.assertEqual(counts["shortlisted"], 1)
+        self.assertEqual(counts["interview"], 1)
+        self.assertEqual(counts["selected"], 1)
+        self.assertEqual(counts["rejected"], 1)
+
+    def test_is_interview_eligible_property(self):
+        u = get_user_model().objects.create_user(
+            username="elig_cand",
+            email="elig_cand@example.com",
+            password="Testpass123!",
+            role=get_user_model().Role.JOBSEEKER,
+        )
+        js = JobseekerProfile.objects.create(user=u)
+        app = Application.objects.create(job=self.job, jobseeker=js, status=Application.Status.APPLIED)
+
+        self.assertFalse(app.is_interview_eligible)
+
+        app.status = Application.Status.UNDER_REVIEW
+        self.assertFalse(app.is_interview_eligible)
+
+        app.status = Application.Status.SHORTLISTED
+        self.assertTrue(app.is_interview_eligible)
+
+        app.status = Application.Status.INTERVIEW
+        self.assertTrue(app.is_interview_eligible)
+
+        app.status = Application.Status.SELECTED
+        self.assertFalse(app.is_interview_eligible)
+
+        app.status = Application.Status.REJECTED
+        self.assertFalse(app.is_interview_eligible)
+
+    def test_interview_clean_rejects_ineligible_application(self):
+        u = get_user_model().objects.create_user(
+            username="clean_cand",
+            email="clean_cand@example.com",
+            password="Testpass123!",
+            role=get_user_model().Role.JOBSEEKER,
+        )
+        js = JobseekerProfile.objects.create(user=u)
+        app = Application.objects.create(job=self.job, jobseeker=js, status=Application.Status.APPLIED)
+
+        interview = Interview(
+            application=app,
+            interview_type=Interview.InterviewType.VIDEO,
+            status=Interview.InterviewStatus.SCHEDULED,
+            scheduled_at=timezone.now() + timedelta(days=2),
+            duration_minutes=30,
+            location_or_link="https://example.com/meet",
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            interview.clean()
+        self.assertIn("Shortlisted' or 'Interview", str(ctx.exception))

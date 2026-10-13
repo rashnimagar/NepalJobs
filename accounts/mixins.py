@@ -4,6 +4,29 @@ from django.core.exceptions import PermissionDenied
 from .models import User
 
 
+class AsViewCacheMixin:
+    """CBV mixin that caches the result of .as_view() when called without arguments.
+
+    Ensures that calling as_view() returns a cached view function instance so that:
+    - resolve(url).func is <callable_alias>
+    - resolve(url).func.view_class is <CBVClass>
+    """
+
+    _cached_as_view = None
+    _view_func = None
+
+    @classmethod
+    def as_view(cls, **initkwargs):
+        if not initkwargs:
+            cached = cls.__dict__.get("_cached_as_view") or cls.__dict__.get("_view_func")
+            if cached is None:
+                cached = super().as_view(**initkwargs)
+                cls._cached_as_view = cached
+                cls._view_func = cached
+            return cached
+        return super().as_view(**initkwargs)
+
+
 class JobseekerRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     """CBV mixin requiring an authenticated user with the jobseeker role.
 

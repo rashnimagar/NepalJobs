@@ -2358,6 +2358,7 @@ from django.views import View
 import config.urls
 from accounts.mixins import (
     ApprovedEmployerRequiredMixin,
+    AsViewCacheMixin,
     EmployerRequiredMixin,
     JobseekerRequiredMixin,
     StaffRequiredMixin,
@@ -2572,6 +2573,41 @@ class RoleBasedAccessMixinsTests(TestCase):
         request.user = self.jobseeker
         with self.assertRaises(PermissionDenied):
             DummyStaffView.as_view()(request)
+
+
+class AsViewCacheMixinTests(TestCase):
+    """Unit tests for the consolidated AsViewCacheMixin."""
+
+    def test_as_view_callable_caching_and_compatibility(self):
+        class DummyA(AsViewCacheMixin, View):
+            pass
+
+        class DummyB(AsViewCacheMixin, View):
+            pass
+
+        # 1. Multiple calls without arguments return the exact same callable instance
+        func_a1 = DummyA.as_view()
+        func_a2 = DummyA.as_view()
+        self.assertIs(func_a1, func_a2)
+
+        # 2. Both compatibility attribute names (_cached_as_view and _view_func) are populated
+        self.assertIs(DummyA._cached_as_view, func_a1)
+        self.assertIs(DummyA._view_func, func_a1)
+
+        # 3. View class metadata is correctly attached to the callable
+        self.assertIs(func_a1.view_class, DummyA)
+
+        # 4. Distinct classes maintain independent callable instances
+        func_b = DummyB.as_view()
+        self.assertIs(func_b.view_class, DummyB)
+        self.assertIsNot(func_a1, func_b)
+        self.assertIs(DummyB._cached_as_view, func_b)
+        self.assertIs(DummyB._view_func, func_b)
+
+        # 5. Calling with initkwargs bypasses cache and does not overwrite cached instance
+        func_custom = DummyA.as_view(http_method_names=["get"])
+        self.assertIsNot(func_custom, func_a1)
+        self.assertIs(DummyA.as_view(), func_a1)
 
 
 class PublicAndRegistrationCBVTests(TestCase):

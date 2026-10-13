@@ -3,6 +3,21 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 
+class ApplicationQuerySet(models.QuerySet):
+    def get_status_counts(self):
+        counts = self.aggregate(
+            total=models.Count("id"),
+            applied=models.Count("id", filter=models.Q(status=Application.Status.APPLIED)),
+            under_review=models.Count("id", filter=models.Q(status=Application.Status.UNDER_REVIEW)),
+            shortlisted=models.Count("id", filter=models.Q(status=Application.Status.SHORTLISTED)),
+            interview=models.Count("id", filter=models.Q(status=Application.Status.INTERVIEW)),
+            selected=models.Count("id", filter=models.Q(status=Application.Status.SELECTED)),
+            rejected=models.Count("id", filter=models.Q(status=Application.Status.REJECTED)),
+        )
+        counts["all"] = counts["total"]
+        return counts
+
+
 class Application(models.Model):
     class Status(models.TextChoices):
         APPLIED = "applied", "Applied"
@@ -60,6 +75,8 @@ class Application(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ApplicationQuerySet.as_manager()
+
     class Meta:
         ordering = ["-created_at"]
         constraints = [
@@ -80,6 +97,10 @@ class Application(models.Model):
     @property
     def is_terminal(self):
         return self.status in (self.Status.SELECTED, self.Status.REJECTED)
+
+    @property
+    def is_interview_eligible(self):
+        return self.status in (self.Status.SHORTLISTED, self.Status.INTERVIEW)
 
     def can_transition_to(self, new_status):
         allowed = self.VALID_TRANSITIONS.get(self.status, [])
@@ -231,7 +252,7 @@ class Interview(models.Model):
             app = self.application
             # When creating a new scheduled interview, only SHORTLISTED or INTERVIEW applications are eligible
             if self._state.adding and self.status == self.InterviewStatus.SCHEDULED:
-                if app.status not in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW):
+                if not app.is_interview_eligible:
                     raise ValidationError(
                         f"Interviews can only be scheduled for applications in 'Shortlisted' or 'Interview' status, not '{app.get_status_display()}'."
                     )

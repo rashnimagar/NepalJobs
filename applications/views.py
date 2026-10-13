@@ -2,11 +2,15 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 
-from accounts.mixins import ApprovedEmployerRequiredMixin, JobseekerRequiredMixin
+from accounts.mixins import (
+    ApprovedEmployerRequiredMixin,
+    AsViewCacheMixin,
+    JobseekerRequiredMixin,
+)
 from jobs.models import Job
 from notifications.services import (
     notify_application_status_changed,
@@ -22,23 +26,6 @@ from .forms import (
     JobApplicationForm,
 )
 from .models import Application, Interview
-
-
-class AsViewCacheMixin:
-    """
-    Mixin that caches the result of .as_view() when called without arguments,
-    ensuring resolve(url).func is <callable_alias> and resolve(url).func.view_class is <CBVClass>.
-    """
-
-    _cached_as_view = None
-
-    @classmethod
-    def as_view(cls, **initkwargs):
-        if not initkwargs:
-            if cls._cached_as_view is None:
-                cls._cached_as_view = super().as_view(**initkwargs)
-            return cls._cached_as_view
-        return super().as_view(**initkwargs)
 
 
 class ApplyJobView(AsViewCacheMixin, JobseekerRequiredMixin, View):
@@ -160,16 +147,7 @@ class JobseekerApplicationListView(AsViewCacheMixin, JobseekerRequiredMixin, Vie
         )
 
         # Compute status counts in a single aggregation query
-        status_counts = all_applications.aggregate(
-            total=Count("id"),
-            applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
-            under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
-            shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
-            interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
-            selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
-            rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
-        )
-        status_counts["all"] = status_counts["total"]
+        status_counts = all_applications.get_status_counts()
 
         # Status filtering
         current_status = request.GET.get("status", "").strip().lower()
@@ -344,15 +322,7 @@ class EmployerJobApplicantsView(AsViewCacheMixin, ApprovedEmployerRequiredMixin,
         )
 
         # Status counts for filter pills
-        status_counts = {
-            "all": all_applicants.count(),
-            Application.Status.APPLIED: all_applicants.filter(status=Application.Status.APPLIED).count(),
-            Application.Status.UNDER_REVIEW: all_applicants.filter(status=Application.Status.UNDER_REVIEW).count(),
-            Application.Status.SHORTLISTED: all_applicants.filter(status=Application.Status.SHORTLISTED).count(),
-            Application.Status.INTERVIEW: all_applicants.filter(status=Application.Status.INTERVIEW).count(),
-            Application.Status.SELECTED: all_applicants.filter(status=Application.Status.SELECTED).count(),
-            Application.Status.REJECTED: all_applicants.filter(status=Application.Status.REJECTED).count(),
-        }
+        status_counts = all_applicants.get_status_counts()
 
         # Query param filtering
         current_status = request.GET.get("status", "").strip().lower()
@@ -393,16 +363,7 @@ class EmployerAllApplicantsView(AsViewCacheMixin, ApprovedEmployerRequiredMixin,
         )
 
         # Status counts aggregation across all employer applicants
-        status_counts = applicants_qs.aggregate(
-            total=Count("id"),
-            applied=Count("id", filter=Q(status=Application.Status.APPLIED)),
-            under_review=Count("id", filter=Q(status=Application.Status.UNDER_REVIEW)),
-            shortlisted=Count("id", filter=Q(status=Application.Status.SHORTLISTED)),
-            interview=Count("id", filter=Q(status=Application.Status.INTERVIEW)),
-            selected=Count("id", filter=Q(status=Application.Status.SELECTED)),
-            rejected=Count("id", filter=Q(status=Application.Status.REJECTED)),
-        )
-        status_counts["all"] = status_counts["total"]
+        status_counts = applicants_qs.get_status_counts()
 
         # Filter by job
         selected_job_id = request.GET.get("job", "").strip()
@@ -495,10 +456,7 @@ class EmployerApplicationDetailView(AsViewCacheMixin, ApprovedEmployerRequiredMi
         history = application.status_history.select_related("changed_by").order_by("-created_at")
         active_interview = application.interviews.filter(status=Interview.InterviewStatus.SCHEDULED).first()
         historical_interviews = application.interviews.exclude(status=Interview.InterviewStatus.SCHEDULED).order_by("-scheduled_at", "-created_at")
-        can_schedule_interview = (
-            not active_interview
-            and application.status in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW)
-        )
+        can_schedule_interview = not active_interview and application.is_interview_eligible
         schedule_interview_form = InterviewScheduleForm() if can_schedule_interview else None
         complete_interview_form = InterviewCompleteForm() if active_interview else None
 
@@ -562,7 +520,7 @@ class EmployerScheduleInterviewView(AsViewCacheMixin, ApprovedEmployerRequiredMi
         )
 
     def _validate_application_stage(self, request, application):
-        if application.status not in (Application.Status.SHORTLISTED, Application.Status.INTERVIEW):
+        if not application.is_interview_eligible:
             messages.error(
                 request,
                 f"Interviews can only be scheduled for applications in 'Shortlisted' or 'Interview' stage, not '{application.get_status_display()}'.",

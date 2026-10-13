@@ -27,18 +27,13 @@ class HomeView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        today = timezone.localdate()
 
         categories = (
             Category.objects.filter(is_active=True)
             .annotate(
                 open_jobs_count=Count(
                     "jobs",
-                    filter=Q(
-                        jobs__status=Job.Status.PUBLISHED,
-                        jobs__application_deadline__gte=today,
-                        jobs__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
-                    ),
+                    filter=Job.open_q(prefix="jobs"),
                 )
             )
             .order_by("-open_jobs_count", "name")[:8]
@@ -261,11 +256,7 @@ class SavedJobListView(JobseekerRequiredMixin, ListView):
         today = timezone.localdate()
         self.today = today
 
-        self.open_q = Q(
-            job__status=Job.Status.PUBLISHED,
-            job__application_deadline__gte=today,
-            job__employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
-        )
+        self.open_q = Job.open_q(prefix="job")
 
         self.filter_counts = profile.saved_jobs.aggregate(
             total=Count("id"),

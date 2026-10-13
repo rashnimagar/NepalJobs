@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.admin.sites import site
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.db.models import Count
 from django.test import TestCase
 from django.urls import resolve, reverse
 from django.utils import timezone
@@ -417,6 +418,42 @@ class JobQuerySetManagerTests(TestCase):
         self.assertNotIn(self.job_draft, expired)
         self.assertNotIn(self.job_closed, expired)
         self.assertEqual(len(expired), 1)
+
+    def test_open_q_direct_matches_open_jobs(self):
+        direct_filtered = list(Job.objects.filter(Job.open_q()))
+        manager_filtered = list(Job.objects.open_jobs())
+        self.assertEqual(direct_filtered, manager_filtered)
+        self.assertIn(self.job_open, direct_filtered)
+        self.assertNotIn(self.job_draft, direct_filtered)
+        self.assertNotIn(self.job_closed, direct_filtered)
+        self.assertNotIn(self.job_expired, direct_filtered)
+        self.assertNotIn(self.job_unapproved_emp, direct_filtered)
+
+    def test_open_q_related_category_prefix(self):
+        cat = Category.objects.annotate(
+            open_count=Count("jobs", filter=Job.open_q(prefix="jobs"))
+        ).get(pk=self.category.pk)
+        self.assertEqual(cat.open_count, 1)
+
+    def test_open_q_related_saved_job_prefix(self):
+        candidate = User.objects.create_user(
+            username="saved_q_cand",
+            email="saved_q_cand@example.com",
+            password="Testpass123!",
+            role=User.Role.JOBSEEKER,
+        )
+        profile = JobseekerProfile.objects.create(user=candidate)
+        SavedJob.objects.create(jobseeker=profile, job=self.job_open)
+        SavedJob.objects.create(jobseeker=profile, job=self.job_expired)
+        SavedJob.objects.create(jobseeker=profile, job=self.job_unapproved_emp)
+
+        open_saved = list(SavedJob.objects.filter(jobseeker=profile).filter(Job.open_q(prefix="job")))
+        self.assertEqual(len(open_saved), 1)
+        self.assertEqual(open_saved[0].job, self.job_open)
+
+        # Test with trailing double-underscore prefix as well
+        open_saved_alt = list(SavedJob.objects.filter(jobseeker=profile).filter(Job.open_q(prefix="job__")))
+        self.assertEqual(open_saved, open_saved_alt)
 
 
 class JobLifecycleTests(TestCase):

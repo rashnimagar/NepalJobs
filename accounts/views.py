@@ -23,6 +23,7 @@ from django.views.decorators.http import require_POST
 
 from .decorators import employer_required, jobseeker_required
 from .mixins import (
+    AsViewCacheMixin,
     EmployerRequiredMixin,
     JobseekerRequiredMixin,
     StaffRequiredMixin,
@@ -52,23 +53,6 @@ from django.utils import timezone
 
 from applications.models import Application, Interview
 from jobs.models import Job
-
-
-class AsViewCacheMixin:
-    """
-    Ensures that calling as_view() without arguments returns a cached view function
-    instance so that resolve().func matches module-level callable aliases.
-    """
-
-    _view_func = None
-
-    @classmethod
-    def as_view(cls, **initkwargs):
-        if not initkwargs:
-            if cls._view_func is None:
-                cls._view_func = super().as_view(**initkwargs)
-            return cls._view_func
-        return super().as_view(**initkwargs)
 
 
 class RegisterChoiceView(AsViewCacheMixin, TemplateView):

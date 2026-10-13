@@ -37,12 +37,7 @@ class Location(models.Model):
 
 class JobQuerySet(models.QuerySet):
     def open_jobs(self):
-        today = timezone.localdate()
-        return self.filter(
-            status=Job.Status.PUBLISHED,
-            application_deadline__gte=today,
-            employer__verification_status=EmployerProfile.VerificationStatus.APPROVED,
-        )
+        return self.filter(Job.open_q())
 
     def expired_jobs(self):
         today = timezone.localdate()
@@ -50,6 +45,11 @@ class JobQuerySet(models.QuerySet):
             status=Job.Status.PUBLISHED,
             application_deadline__lt=today,
         )
+
+    @classmethod
+    def open_q(cls, prefix=""):
+        return Job.open_q(prefix=prefix)
+
 
 
 class Job(models.Model):
@@ -162,6 +162,18 @@ class Job(models.Model):
 
         if errors:
             raise ValidationError(errors)
+
+    @classmethod
+    def open_q(cls, prefix=""):
+        today = timezone.localdate()
+        p = f"{prefix}__" if prefix and not prefix.endswith("__") else prefix
+        return models.Q(
+            **{
+                f"{p}status": cls.Status.PUBLISHED,
+                f"{p}application_deadline__gte": today,
+                f"{p}employer__verification_status": EmployerProfile.VerificationStatus.APPROVED,
+            }
+        )
 
     @property
     def is_open(self):
