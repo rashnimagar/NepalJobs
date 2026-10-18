@@ -34,6 +34,20 @@ class JobseekerProfile(models.Model):
     summary = models.TextField(blank=True)
     skills = models.ManyToManyField("Skill", blank=True, related_name="jobseekers")
 
+    def get_saved_job_ids(self, job_ids):
+        """
+        Return a set of job IDs that this jobseeker has saved out of the provided iterable of job IDs.
+        Accepts an iterable of integer IDs or Job model instances.
+        """
+        if not job_ids:
+            return set()
+        clean_ids = [getattr(j, "pk", j) for j in job_ids]
+        if not clean_ids:
+            return set()
+        return set(
+            self.saved_jobs.filter(job_id__in=clean_ids).values_list("job_id", flat=True)
+        )
+
     def __str__(self):
         return  self.user.get_full_name() or self.user.username
 

@@ -1,5 +1,6 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
+from django.http import QueryDict
 
 from .models import User
 
@@ -90,3 +91,32 @@ class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     def test_func(self):
         user = self.request.user
         return bool(user.is_authenticated and (user.is_staff or user.is_superuser))
+
+
+def get_pagination_query_string(request, page_param="page"):
+    """
+    Return a URL-encoded query string preserving all GET parameters except the pagination parameter.
+    Accepts an HttpRequest object, a QueryDict, a dictionary, or a query string.
+    """
+    if not request:
+        return ""
+    query_dict = getattr(request, "GET", request)
+    if isinstance(query_dict, QueryDict):
+        query_params = query_dict.copy()
+    elif isinstance(query_dict, dict) or hasattr(query_dict, "items"):
+        query_params = QueryDict(mutable=True)
+        for k, v in query_dict.items():
+            if isinstance(v, (list, tuple)):
+                for item in v:
+                    query_params.appendlist(k, str(item))
+            else:
+                query_params[k] = str(v)
+    elif isinstance(query_dict, str):
+        query_params = QueryDict(query_dict, mutable=True)
+    else:
+        return ""
+
+    if page_param in query_params:
+        del query_params[page_param]
+
+    return query_params.urlencode()

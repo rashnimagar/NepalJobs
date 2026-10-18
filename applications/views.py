@@ -10,6 +10,7 @@ from accounts.mixins import (
     ApprovedEmployerRequiredMixin,
     AsViewCacheMixin,
     JobseekerRequiredMixin,
+    get_pagination_query_string,
 )
 from jobs.models import Job
 from notifications.services import (
@@ -400,10 +401,7 @@ class EmployerAllApplicantsView(AsViewCacheMixin, ApprovedEmployerRequiredMixin,
         page_obj = paginator.get_page(page_number)
 
         # Query string preservation across pagination
-        query_params = request.GET.copy()
-        if "page" in query_params:
-            del query_params["page"]
-        query_string = query_params.urlencode()
+        query_string = get_pagination_query_string(request)
 
         return render(
             request,

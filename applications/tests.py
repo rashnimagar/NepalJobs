@@ -2556,6 +2556,25 @@ class Step611EmployerAllApplicantsViewTests(TestCase):
         self.assertTrue(response.context["page_obj"].has_previous())
         self.assertIn(f"job={self.job_a1.pk}", response.context["query_string"])
 
+    def test_query_string_preserves_multiple_filters_and_excludes_page(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(
+            self.url,
+            {"job": self.job_a1.pk, "status": "applied", "q": "Subash", "page": 2},
+        )
+        self.assertEqual(response.status_code, 200)
+        qs = response.context["query_string"]
+        self.assertIn(f"job={self.job_a1.pk}", qs)
+        self.assertIn("status=applied", qs)
+        self.assertIn("q=Subash", qs)
+        self.assertNotIn("page=", qs)
+
+    def test_query_string_empty_when_no_parameters_or_only_page(self):
+        self.client.force_login(self.employer_a_user)
+        response = self.client.get(self.url, {"page": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["query_string"], "")
+
     def test_candidate_cannot_access_all_applicants(self):
         self.client.force_login(self.cand1)
         response = self.client.get(self.url)

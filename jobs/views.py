@@ -14,7 +14,11 @@ from django.views.generic import (
     UpdateView,
 )
 
-from accounts.mixins import ApprovedEmployerRequiredMixin, JobseekerRequiredMixin
+from accounts.mixins import (
+    ApprovedEmployerRequiredMixin,
+    JobseekerRequiredMixin,
+    get_pagination_query_string,
+)
 from accounts.models import EmployerProfile, JobseekerProfile
 from jobs.forms import JobForm
 from jobs.models import Category, Job, Location, SavedJob
@@ -131,10 +135,7 @@ class JobListView(ListView):
         locations = Location.objects.all()
         employment_types = Job.EmploymentType.choices
 
-        query_params = request.GET.copy()
-        if "page" in query_params:
-            del query_params["page"]
-        query_string = query_params.urlencode()
+        query_string = get_pagination_query_string(request)
 
         has_filters = bool(
             self.q
@@ -150,11 +151,7 @@ class JobListView(ListView):
             profile = getattr(request.user, "jobseeker_profile", None)
             if profile:
                 page_job_ids = [j.pk for j in page_obj.object_list]
-                saved_job_ids = set(
-                    profile.saved_jobs.filter(job_id__in=page_job_ids).values_list(
-                        "job_id", flat=True
-                    )
-                )
+                saved_job_ids = profile.get_saved_job_ids(page_job_ids)
 
         context.update(
             {
@@ -300,10 +297,7 @@ class SavedJobListView(JobseekerRequiredMixin, ListView):
         for sj in page_obj.object_list:
             sj.user_application_pk = applied_apps.get(sj.job_id)
 
-        query_params = self.request.GET.copy()
-        if "page" in query_params:
-            del query_params["page"]
-        query_string = query_params.urlencode()
+        query_string = get_pagination_query_string(self.request)
 
         context.update(
             {

@@ -3984,3 +3984,66 @@ class EmployerJobManagementCBVTests(TestCase):
         past_draft.refresh_from_db()
         self.assertEqual(past_draft.status, Job.Status.DRAFT)
         self.assertIsNone(past_draft.published_at)
+
+
+class JobPaginationQueryStringTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="page_emp", email="page_emp@example.com")
+        self.category = make_category(name="Engineering", slug="engineering")
+        self.location = make_location(name="Lalitpur", slug="lalitpur")
+        self.job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Backend Engineer",
+            description="Django APIs.",
+            employment_type=Job.EmploymentType.FULL_TIME,
+            application_deadline=timezone.localdate() + timedelta(days=14),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.jobseeker_user = make_jobseeker(username="page_seeker", email="page_seeker@example.com")
+        self.saved_job = SavedJob.objects.create(
+            jobseeker=self.jobseeker_user.jobseeker_profile,
+            job=self.job,
+        )
+
+    def test_job_list_pagination_query_string_preserves_filters_and_excludes_page(self):
+        url = reverse("job_list")
+        response = self.client.get(
+            url,
+            {
+                "q": "Backend",
+                "category": self.category.slug,
+                "location": self.location.slug,
+                "sort": "deadline",
+                "page": 2,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        qs = response.context["query_string"]
+        self.assertIn("q=Backend", qs)
+        self.assertIn(f"category={self.category.slug}", qs)
+        self.assertIn(f"location={self.location.slug}", qs)
+        self.assertIn("sort=deadline", qs)
+        self.assertNotIn("page=", qs)
+
+    def test_job_list_pagination_query_string_empty_when_no_filters(self):
+        url = reverse("job_list")
+        response = self.client.get(url, {"page": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["query_string"], "")
+
+    def test_saved_job_list_pagination_query_string_preserves_status_and_excludes_page(self):
+        self.client.force_login(self.jobseeker_user)
+        url = reverse("saved_job_list")
+        response = self.client.get(url, {"status": "all", "page": 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["query_string"], "status=all")
+
+    def test_saved_job_list_pagination_query_string_empty_when_no_filters(self):
+        self.client.force_login(self.jobseeker_user)
+        url = reverse("saved_job_list")
+        response = self.client.get(url, {"page": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["query_string"], "")

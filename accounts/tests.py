@@ -17,12 +17,13 @@ from PIL import Image
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import FileResponse
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse, resolve
 from django.views import View
 from django.views.generic import DetailView, FormView, TemplateView, UpdateView
 
 from .forms import EmployerProfileForm, EmployerVerificationForm
+from .mixins import get_pagination_query_string
 from .views import (
     CVDeleteView,
     CVDownloadView,
@@ -3424,3 +3425,132 @@ class VerificationAndCVOperationsCBVTests(TestCase):
         res_app_emp = self.client.get(url)
         self.assertEqual(res_app_emp.status_code, 200)
         self.assertIsInstance(res_app_emp, FileResponse)
+
+
+class JobseekerProfileSavedJobIdsTests(TestCase):
+    """
+    Focused unit tests for JobseekerProfile.get_saved_job_ids(job_ids) and edge cases.
+    """
+
+    def setUp(self):
+        from jobs.models import Category, Location, Job, SavedJob
+
+        self.candidate1 = make_jobseeker("save_cand1", "save_cand1@example.com")
+        self.profile1 = self.candidate1.jobseeker_profile
+
+        self.candidate2 = make_jobseeker("save_cand2", "save_cand2@example.com")
+        self.profile2 = self.candidate2.jobseeker_profile
+
+        self.employer_user = make_employer("save_emp", "save_emp@example.com")
+        self.employer_profile = self.employer_user.employer_profile
+        self.employer_profile.verification_status = EmployerProfile.VerificationStatus.APPROVED
+        self.employer_profile.save()
+
+        cat, _ = Category.objects.get_or_create(name="Engineering", defaults={"slug": "engineering"})
+        loc, _ = Location.objects.get_or_create(name="Pokhara", defaults={"slug": "pokhara"})
+
+        self.job1 = Job.objects.create(
+            employer=self.employer_profile,
+            category=cat,
+            location=loc,
+            title="Backend Dev",
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+        self.job2 = Job.objects.create(
+            employer=self.employer_profile,
+            category=cat,
+            location=loc,
+            title="Frontend Dev",
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+        self.job3 = Job.objects.create(
+            employer=self.employer_profile,
+            category=cat,
+            location=loc,
+            title="DevOps Lead",
+            status=Job.Status.PUBLISHED,
+            application_deadline=timezone.localdate() + timedelta(days=10),
+        )
+
+        # candidate1 saves job1 and job3
+        SavedJob.objects.create(jobseeker=self.profile1, job=self.job1)
+        SavedJob.objects.create(jobseeker=self.profile1, job=self.job3)
+
+        # candidate2 saves job2
+        SavedJob.objects.create(jobseeker=self.profile2, job=self.job2)
+
+    def test_empty_inputs_return_empty_set_without_query(self):
+        with self.assertNumQueries(0):
+            self.assertEqual(self.profile1.get_saved_job_ids([]), set())
+            self.assertEqual(self.profile1.get_saved_job_ids(()), set())
+            self.assertEqual(self.profile1.get_saved_job_ids(set()), set())
+            self.assertEqual(self.profile1.get_saved_job_ids(None), set())
+            self.assertEqual(self.profile1.get_saved_job_ids((x for x in [])), set())
+
+    def test_saved_job_ids_matching_and_exclusion(self):
+        result = self.profile1.get_saved_job_ids([self.job1.pk, self.job2.pk, self.job3.pk])
+        self.assertIsInstance(result, set)
+        self.assertEqual(result, {self.job1.pk, self.job3.pk})
+        self.assertNotIn(self.job2.pk, result)
+
+    def test_model_instances_and_generators(self):
+        # Accepts list of model instances directly
+        result_instances = self.profile1.get_saved_job_ids([self.job1, self.job2, self.job3])
+        self.assertEqual(result_instances, {self.job1.pk, self.job3.pk})
+
+        # Accepts generator expression
+        result_gen = self.profile1.get_saved_job_ids(j for j in [self.job1, self.job2])
+        self.assertEqual(result_gen, {self.job1.pk})
+
+    def test_duplicate_and_nonexistent_ids(self):
+        # Duplicates in input and nonexistent IDs
+        result = self.profile1.get_saved_job_ids([self.job1.pk, self.job1.pk, 999999, 888888])
+        self.assertEqual(result, {self.job1.pk})
+
+    def test_candidate_isolation(self):
+        all_ids = [self.job1.pk, self.job2.pk, self.job3.pk]
+        self.assertEqual(self.profile2.get_saved_job_ids(all_ids), {self.job2.pk})
+        self.assertEqual(self.profile1.get_saved_job_ids(all_ids), {self.job1.pk, self.job3.pk})
+
+
+class PaginationQueryStringHelperTests(TestCase):
+    def setUp(self):
+        self.rf = RequestFactory()
+
+    def test_empty_or_none_inputs(self):
+        self.assertEqual(get_pagination_query_string(None), "")
+        self.assertEqual(get_pagination_query_string({}), "")
+        request = self.rf.get("/")
+        self.assertEqual(get_pagination_query_string(request), "")
+
+    def test_page_param_removed(self):
+        request = self.rf.get("/?page=2")
+        self.assertEqual(get_pagination_query_string(request), "")
+
+        request2 = self.rf.get("/?page=1&q=developer")
+        self.assertEqual(get_pagination_query_string(request2), "q=developer")
+
+        request3 = self.rf.get("/?q=developer&page=3&sort=newest")
+        self.assertEqual(get_pagination_query_string(request3), "q=developer&sort=newest")
+
+    def test_custom_page_param(self):
+        request = self.rf.get("/?p=2&q=developer")
+        self.assertEqual(get_pagination_query_string(request, page_param="p"), "q=developer")
+        self.assertEqual(get_pagination_query_string(request, page_param="page"), "p=2&q=developer")
+
+    def test_multiple_values_preserved(self):
+        request = self.rf.get("/?skills=python&skills=django&page=4")
+        self.assertEqual(get_pagination_query_string(request), "skills=python&skills=django")
+
+    def test_special_characters_and_encoding(self):
+        request = self.rf.get("/?q=senior+developer&tag=c%2B%2B&page=5")
+        self.assertEqual(get_pagination_query_string(request), "q=senior+developer&tag=c%2B%2B")
+
+    def test_dict_inputs(self):
+        self.assertEqual(get_pagination_query_string({"q": "test", "page": "2"}), "q=test")
+        self.assertEqual(
+            get_pagination_query_string({"skills": ["python", "django"], "page": "1"}),
+            "skills=python&skills=django",
+        )

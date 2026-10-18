@@ -408,11 +408,7 @@ class CompanyDetailView(AsViewCacheMixin, DetailView):
             profile = getattr(user, "jobseeker_profile", None)
             if profile:
                 page_job_ids = [j.pk for j in page_obj.object_list]
-                saved_job_ids = set(
-                    profile.saved_jobs.filter(job_id__in=page_job_ids).values_list(
-                        "job_id", flat=True
-                    )
-                )
+                saved_job_ids = profile.get_saved_job_ids(page_job_ids)
 
         context.update(
             {
