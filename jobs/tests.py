@@ -54,6 +54,7 @@ from jobs.views import (
     job_list,
     saved_job_list,
     toggle_save_job,
+    format_validation_error,
 )
 from notifications.models import Notification
 
@@ -4047,3 +4048,75 @@ class JobPaginationQueryStringTests(TestCase):
         response = self.client.get(url, {"page": 1})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["query_string"], "")
+
+
+class ValidationErrorFormattingTests(TestCase):
+    def setUp(self):
+        self.employer = make_approved_employer(username="fmt_emp", email="fmt_emp@example.com")
+        self.category = make_category(name="Fmt Cat", slug="fmt-cat")
+        self.location = make_location(name="Fmt Loc", slug="fmt-loc")
+
+    def test_format_none_returns_empty(self):
+        self.assertEqual(format_validation_error(None), "")
+
+    def test_format_message_dict(self):
+        err = ValidationError({"deadline": ["Date must be in the future."], "salary": ["Must be positive."]})
+        res = format_validation_error(err)
+        self.assertIn("deadline: Date must be in the future.", res)
+        self.assertIn("salary: Must be positive.", res)
+
+    def test_format_messages_list(self):
+        err = ValidationError(["First error.", "Second error."])
+        res = format_validation_error(err)
+        self.assertEqual(res, "First error.; Second error.")
+
+    def test_format_single_string(self):
+        err = ValidationError("Only approved employers may publish jobs.")
+        self.assertEqual(format_validation_error(err), "Only approved employers may publish jobs.")
+
+    def test_format_fallback_exception(self):
+        err = Exception("Standard exception text")
+        self.assertEqual(format_validation_error(err), "Standard exception text")
+
+    def test_publish_validation_error_flash_message(self):
+        self.client.force_login(self.employer.user)
+        past_draft = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Past Job",
+            description="Desc",
+            application_deadline=timezone.localdate() - timedelta(days=2),
+            status=Job.Status.DRAFT,
+        )
+        response = self.client.post(reverse("employer_job_publish", args=[past_draft.pk]))
+        self.assertRedirects(response, reverse("employer_job_detail", args=[past_draft.pk]))
+        messages = list(response.wsgi_request._messages)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(
+            messages[0].message,
+            "Unable to publish job: Application deadline must be today or a future date.",
+        )
+
+    def test_close_validation_error_flash_message(self):
+        self.client.force_login(self.employer.user)
+        job = Job.objects.create(
+            employer=self.employer,
+            category=self.category,
+            location=self.location,
+            title="Open Job",
+            description="Desc",
+            application_deadline=timezone.localdate() + timedelta(days=10),
+            status=Job.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        from unittest.mock import patch
+        with patch.object(Job, "close", side_effect=ValidationError({"status": ["Job cannot be closed right now."]})):
+            response = self.client.post(reverse("employer_job_close", args=[job.pk]))
+            self.assertRedirects(response, reverse("employer_job_detail", args=[job.pk]))
+            messages = list(response.wsgi_request._messages)
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(
+                messages[0].message,
+                "Unable to close job: status: Job cannot be closed right now.",
+            )

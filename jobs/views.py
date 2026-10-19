@@ -417,6 +417,22 @@ class EmployerJobEditView(ApprovedEmployerRequiredMixin, UpdateView):
         return redirect("employer_job_detail", pk=job.pk)
 
 
+def format_validation_error(exc):
+    """
+    Format a Django ValidationError into a human-readable string.
+    Handles message_dict (field errors), messages (list of errors), or fallback to str(exc).
+    """
+    if exc is None:
+        return ""
+    if hasattr(exc, "message_dict"):
+        return "; ".join(
+            f"{k}: {', '.join(v)}" for k, v in exc.message_dict.items()
+        )
+    if hasattr(exc, "messages"):
+        return "; ".join(exc.messages)
+    return str(exc)
+
+
 class EmployerJobPublishView(ApprovedEmployerRequiredMixin, View):
     """
     Publishes an owned draft or closed job. Requires POST method.
@@ -431,14 +447,7 @@ class EmployerJobPublishView(ApprovedEmployerRequiredMixin, View):
             job.publish()
             messages.success(request, f'Job "{job.title}" has been published.')
         except ValidationError as e:
-            if hasattr(e, "message_dict"):
-                error_msg = "; ".join(
-                    f"{k}: {', '.join(v)}" for k, v in e.message_dict.items()
-                )
-            elif hasattr(e, "messages"):
-                error_msg = "; ".join(e.messages)
-            else:
-                error_msg = str(e)
+            error_msg = format_validation_error(e)
             messages.error(request, f"Unable to publish job: {error_msg}")
         return redirect("employer_job_detail", pk=job.pk)
 
@@ -457,14 +466,7 @@ class EmployerJobCloseView(ApprovedEmployerRequiredMixin, View):
             job.close()
             messages.success(request, f'Job "{job.title}" has been closed.')
         except ValidationError as e:
-            if hasattr(e, "message_dict"):
-                error_msg = "; ".join(
-                    f"{k}: {', '.join(v)}" for k, v in e.message_dict.items()
-                )
-            elif hasattr(e, "messages"):
-                error_msg = "; ".join(e.messages)
-            else:
-                error_msg = str(e)
+            error_msg = format_validation_error(e)
             messages.error(request, f"Unable to close job: {error_msg}")
         return redirect("employer_job_detail", pk=job.pk)
 
